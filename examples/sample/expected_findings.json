@@ -1,0 +1,81 @@
+{
+  "description": "Ground truth for `rv-triage collect --source examples/sample/source` (directory source): the finding codes of every packaged file (manifest.json collected[].findings) and of every target that is not in the package (manifest.json not_collected[].finding, keyed by group).",
+  "source_kind": "directory",
+  "exit_code": 0,
+  "collected": {
+    "volatile/system.json": [
+      "COLLECTED_API"
+    ],
+    "artifacts/browsers/Users/ana.ruiz/AppData/Local/Microsoft/Edge/User Data/Default/History": [
+      "COLLECTED_API"
+    ],
+    "artifacts/browsers/Users/ana.ruiz/AppData/Local/Microsoft/Edge/User Data/Default/History-journal": [
+      "COLLECTED_API"
+    ],
+    "artifacts/browsers/Users/ben.test/AppData/Local/Google/Chrome/User Data/Default/History": [
+      "COLLECTED_API"
+    ],
+    "artifacts/browsers/Users/ben.test/AppData/Roaming/Mozilla/Firefox/Profiles/x1y2z3.default-release/places.sqlite": [
+      "COLLECTED_API"
+    ],
+    "artifacts/browsers/Users/ben.test/AppData/Roaming/Mozilla/Firefox/Profiles/x1y2z3.default-release/places.sqlite-wal": [
+      "COLLECTED_API"
+    ],
+    "artifacts/evtx/Windows/System32/winevt/Logs/Application.evtx": [
+      "COLLECTED_API"
+    ],
+    "artifacts/evtx/Windows/System32/winevt/Logs/Security.evtx": [
+      "COLLECTED_API"
+    ],
+    "artifacts/evtx/Windows/System32/winevt/Logs/System.evtx": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Users/ana.ruiz/AppData/Local/Microsoft/Windows/UsrClass.dat": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Users/ana.ruiz/NTUSER.DAT": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Users/ben.test/AppData/Local/Microsoft/Windows/UsrClass.dat": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Users/ben.test/NTUSER.DAT": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Windows/System32/config/DEFAULT": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Windows/System32/config/SAM": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Windows/System32/config/SECURITY": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Windows/System32/config/SOFTWARE": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Windows/System32/config/SYSTEM": [
+      "COLLECTED_API"
+    ],
+    "artifacts/hives/Windows/System32/config/SYSTEM.LOG1": [
+      "COLLECTED_API"
+    ],
+    "artifacts/prefetch/Windows/Prefetch/CMD.EXE-0BD30981.pf": [
+      "COLLECTED_API"
+    ],
+    "artifacts/prefetch/Windows/Prefetch/NOTEPAD.EXE-D8414F97.pf": [
+      "COLLECTED_API"
+    ],
+    "artifacts/tasks/Windows/System32/Tasks/RakvorSample/DailyCheck": [
+      "COLLECTED_API"
+    ],
+    "artifacts/tasks/Windows/System32/Tasks/RakvorSampleUpdater": [
+      "COLLECTED_API"
+    ]
+  },
+  "not_collected": {
+    "volatile": [
+      "NOT_AVAILABLE_FROM_SOURCE"
+    ]
+  }
+}

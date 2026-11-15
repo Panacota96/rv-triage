@@ -4,8 +4,7 @@
   "name": "rv-triage",
   "module": "rv_triage",
   "title": "RV Triage",
-  "run_command": "scan",
-  "planned_command": "collect",
+  "run_command": "collect",
   "case_role": "analysis",
   "created": "2026-11-11",
   "cli_command": [
