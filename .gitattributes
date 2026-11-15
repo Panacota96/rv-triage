@@ -8,3 +8,4 @@
 examples/sample/source/** binary
 tests/fixtures/case-evidence/** binary
 tests/golden/*.zip binary
+src/core/tests/fixtures/*.img.gz binary

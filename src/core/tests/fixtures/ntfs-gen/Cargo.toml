@@ -1,0 +1,14 @@
+[package]
+name = "rv-triage-ntfs-fixture-gen"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Generates src/core/tests/fixtures/ntfs-windows.img.gz (synthetic NTFS volume) for rv-triage tests"
+license = "MIT OR Apache-2.0"
+
+# Standalone: not a member of the rv-triage workspace, never built by its CI.
+[workspace]
+
+[dependencies]
+rust-fs-ntfs = "=0.10.2"
+flate2 = "1"

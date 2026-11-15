@@ -36,6 +36,7 @@ const-oid.workspace = true
 rsa.workspace = true
 # `oid`: RSA PKCS#1 v1.5 verification of TSA tokens needs the digest OIDs.
 sha2-legacy = { workspace = true, features = ["oid"] }
+ntfs.workspace = true
 
 # Live collection on Windows (host facts + volatile capture): raw Win32 bindings, read-only APIs only.
 # windows-sys 0.61 is already in Cargo.lock (no new crate versions); MIT OR Apache-2.0.
@@ -58,3 +59,4 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tempfile.workspace = true
+flate2.workspace = true
