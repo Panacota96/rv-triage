@@ -1,15 +1,19 @@
 # Forensic audit trail
 
-Everything RV Triage does is written to `<OUT>/logs/<RUN-ID>/`. The folder is designed so that a second
-examiner, months later, can check **what was done, to which files, by whom, with which tool version**, and
-that the record was not altered.
+Everything RV Triage does is written to `<OUT>/logs/<RUN-ID>/`. The folder is designed so that a second examiner,
+months later, can check **what was collected from which machine, how each file was read, by whom, with which tool
+version**, that the record was not altered, and that the package still holds the bytes that were read.
 
 | File | Content |
 | --- | --- |
 | `audit.jsonl` | One JSON object per action, hash-chained (authoritative) |
 | `audit.log` | The same actions as readable text (convenience copy) |
-| `hashes.csv` | Hash register: `index,path,size,<algo1>[,<algo2>],status,error` |
+| `hashes.csv` | Hash register of the packaged files, from the re-read: `index,path,size,<algo1>[,<algo2>],status,error` |
 | `environment.json` | Tool version, compiler, target, every dependency version, OS, host, OS user, working folder, command line |
+| `timestamp-<N>.tsr` / `.json` | RFC 3161 token over the chain head and its readable summary (when obtained) |
+
+The package itself is in `<OUT>/reports/<RUN-ID>/package/`; every file in it is named in the log with its digests
+(`output_written`), so the log vouches for the package.
 
 ## The hash chain
 
@@ -17,12 +21,13 @@ that the record was not altered.
 flowchart LR
     G["GENESIS<br/>000…000"] --> E1
     E1["#1 run_started<br/>prev = GENESIS<br/>entry_hash = H1"] --> E2
-    E2["#2 environment_recorded<br/>prev = H1<br/>entry_hash = H2"] --> E3
-    E3["#3 inputs_resolved<br/>prev = H2<br/>entry_hash = H3"] --> EN["… #N run_finished"]
+    E2["#2 environment_recorded<br/>prev = H1"] --> E3
+    E3["#3 collection_started<br/>prev = H2"] --> E4["… artifact_collected<br/>output_written …"]
+    E4 --> EN["#N run_finished"]
 ```
 
-Each entry has: `seq`, `ts_utc`, `run_id`, `actor`, `action`, optional `item`, `details`,
-`prev_entry_hash`, `entry_hash`.
+Each entry has: `seq`, `ts_utc`, `run_id`, `actor`, `action`, optional `item`, `details`, `prev_entry_hash`,
+`entry_hash`.
 
 ```text
 entry_hash = SHA-256( canonical JSON of the entry without "entry_hash" )
@@ -30,18 +35,18 @@ canonical  = keys sorted at every level, no spaces, UTF-8, integers only
              (Python: json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
 ```
 
-Editing a value changes that entry's hash; deleting or re-ordering breaks `seq` and `prev_entry_hash`.
-Verify with either implementation:
+Editing a value changes that entry's hash; deleting or re-ordering breaks `seq` and `prev_entry_hash`. Verify with
+either implementation:
 
 ```bash
-rv-triage verify-log rakvor-out/logs/<RUN-ID>          # exit 0 intact, 3 broken, truncated or an output changed
-python tests/verify_chain.py rakvor-out/logs/<RUN-ID>   # independent re-implementation (chain + hashes.csv + recorded outputs)
+rv-triage verify-log E:/triage/logs/<RUN-ID>          # exit 0 intact, 3 broken, truncated or an output changed
+python tests/verify_chain.py E:/triage/logs/<RUN-ID>   # independent re-implementation (chain + recorded outputs)
 ```
 
 > The chain proves the log is **internally consistent**. On its own it does not prove *when* it was written —
-> that is what the trusted timestamp below adds — nor that it is *complete*: removing the last entries leaves a
-> shorter chain that is still valid. Storing the final `entry_hash` (printed in the statistics report) in your
-> case management system remains good practice.
+> that is what the trusted timestamp adds — nor that it is *complete*: removing the last entries leaves a shorter
+> chain that is still valid. Keep the final `entry_hash` (printed by the CLI as `audit head` and in the statistics
+> report) in your case notes.
 
 ### Truncation: what anchors the end of the log
 
@@ -52,35 +57,27 @@ A chain cannot vouch for its own length, so `verify-log` compares the end of the
 flowchart LR
     L["audit.jsonl<br/>entries #1 … #N"] --> V{"verify-log"}
     T["timestamp-K.json + .tsr<br/>covers_seq K, head = hash of #K"] --> V
-    C["case-log.jsonl run_finished<br/>audit_entries M, audit_head"] --> V
-    V -->|"#K or #M missing, or another hash"| B["BROKEN: truncated (exit 3)"]
+    V -->|"#K missing, or another hash"| B["BROKEN: truncated (exit 3)"]
     V -->|"the records agree"| O["OK + which entries are anchored"]
-    V -->|"no timestamp, not in a case"| N["OK + 'truncation not detectable<br/>without a timestamp or case record'"]
+    V -->|"no timestamp"| N["OK + 'truncation not detectable<br/>without a timestamp or case record'"]
 ```
 
-| Record | Where | What `verify-log` checks |
-| --- | --- | --- |
-| RFC 3161 timestamp | `timestamp-<K>.json` / `.tsr` next to the log | entry `#K` still exists and its `entry_hash` is the head the token signs; every `timestamp_obtained` entry still has its token file |
-| Case log | `<CASE>/case-log.jsonl`, for a run in `<CASE>/runs/<tool>/<RUN-ID>/logs` | `run_finished` of this run records `audit_entries` and `audit_head`: entry `#M` exists with that hash, and only `timestamp_obtained` follows it |
-
-The output names the last anchored entry. A standalone run timestamps the head **before** writing
-`timestamp_obtained`, `statistics_report_written` and `run_finished`, so those 3 entries are reported as
-"cannot be proven complete"; a run in a case folder is anchored to its last entry by the case log. Without either
-record `verify-log` prints `truncation not detectable without a timestamp or case record` (exit 0: nothing
-contradicts the log, but nothing vouches for its length). Deleting the timestamp files **and** the entries that
-refer to them is detectable only through the case log or a head kept elsewhere.
+A collection run is standalone (`<OUT>/logs/<RUN-ID>`): the RFC 3161 token is its only anchor. The head is stamped
+**before** `timestamp_obtained`, `statistics_report_written` and `run_finished` are written, so those 3 entries are
+reported as "cannot be proven complete". Without a timestamp `verify-log` prints `truncation not detectable without
+a timestamp or case record` (exit 0: nothing contradicts the log, but nothing vouches for its length). Run
+`rv-triage timestamp <log folder>` once the network is back.
 
 ### Recorded outputs: the files the log vouches for
 
-The chain proves that the *digests* recorded in the log are unchanged, not that the files they describe still
-have them. `verify-log` (and `verify-case`, for every run) therefore re-hashes every output file the log records
-and compares it with every digest recorded for it ([src/core/src/outputs.rs](../src/core/src/outputs.rs), shared
-byte-identical by every Rakvor tool):
+The chain proves that the *digests* recorded in the log are unchanged, not that the files they describe still have
+them. `verify-log` therefore re-hashes every output file the log records and compares it with every digest
+recorded for it ([src/core/src/outputs.rs](../src/core/src/outputs.rs), shared byte-identical by every Rakvor tool):
 
 ```mermaid
 flowchart LR
     A["audit.jsonl (chain intact)"] --> R["recorded files<br/>path → digests; the latest entry wins"]
-    R --> S{"safe relative path,<br/>inside the run folder?"}
+    R --> S{"safe relative path,<br/>inside its area folder?"}
     S -- no --> X["problem: rejected, not read"]
     S -- yes --> E{"exists, regular file?"}
     E -- no --> M["problem: missing / replaced"]
@@ -89,24 +86,26 @@ flowchart LR
     H -- yes --> V["verified"]
 ```
 
-| Entry | File (run folder) |
+| Entry | File |
 | --- | --- |
-| `environment_recorded`, `hash_register_written` | `logs/environment.json`, `logs/hashes.csv` |
-| `item_reports_written` | `reports/<folder>/<file>` for every file of the item |
-| `statistics_report_written` | `reports/statistics.json` and every `statistics.<LANG>.html/.pdf` |
-| `timestamp_obtained` | not re-hashed here: the token is checked by the timestamp verification below |
+| `output_written` (`details.file` = `package/…`) | `reports/<RUN-ID>/package/…`: every artifact copy, every `volatile/*.json`, `manifest.csv`, `manifest.json` |
+| `environment_recorded`, `hash_register_written` | `logs/<RUN-ID>/environment.json`, `logs/<RUN-ID>/hashes.csv` |
+| `item_reports_written` | `reports/<RUN-ID>/items/<folder>/<file>` for every file of the item |
+| `statistics_report_written` | `reports/<RUN-ID>/statistics.json` and every `statistics.<LANG>.html/.pdf` |
+| `timestamp_obtained` | not re-hashed here: the token is checked by the timestamp verification |
 
-A standalone run's folders are `<OUT>/logs/<RUN-ID>` and `<OUT>/reports/<RUN-ID>` (each its own boundary); a
-case run's are `<CASE>/runs/<tool>/<RUN-ID>/logs` and `/reports` (the run folder is the boundary). A recorded path
-that is absolute, contains `..`, a drive, `\` or `:`, or resolves outside the boundary through a symlink or
-junction is rejected and never read. Output: `outputs: N verified of M recorded (algorithms)`, then any file not
-re-hashed with the reason. Files the run never recorded (added to the folder later) are not checked, and the
-human-readable `audit.log` is a copy that nothing vouches for: read `audit.jsonl`.
+The check works only on the original layout: `logs/<RUN-ID>` and `reports/<RUN-ID>` must be siblings under the same
+`<OUT>` folder. **Copy the whole `<OUT>` folder** (or at least both run folders) to the lab, not the package alone.
+A recorded path that is absolute, contains `..`, a drive, `\` or `:`, or resolves outside its area folder through a
+symlink or junction is rejected and never read. Output: `outputs: N verified of M recorded (algorithms)`. On the
+sample source: `outputs: 294 verified of 294 recorded (md5, sha256)`.
 
 ## Trusted timestamp (RFC 3161)
 
 Every run asks a Time-Stamp Authority (TSA) to sign the chain head **just before the statistics report** is
-written, so the report can show the result. Default TSA: `http://timestamp.digicert.com` (`--tsa-url` to change).
+written. Default TSA: `http://timestamp.digicert.com` (`--tsa-url` to change). On a live machine this is the only
+network traffic the tool generates; use `--no-timestamp` on a machine that must not reach the network, and stamp
+the log later from the lab.
 
 ```mermaid
 sequenceDiagram
@@ -118,97 +117,102 @@ sequenceDiagram
     alt reachable
         A-->>T: signed token (genTime)
         T->>L: timestamp_obtained (covers_seq N, gen_time, tsa, token_sha256)
-    else offline
-        T->>L: timestamp_pending (reason) — warning on the statistics report
+    else offline or --no-timestamp
+        T->>L: timestamp_pending (reason), or nothing with --no-timestamp
         Note over T: later: rv-triage timestamp logs/RUN-ID
     end
     T->>L: statistics_report_written · run_finished
 ```
 
-- The token is stored next to the log: `timestamp-<N>.tsr` (DER) and `timestamp-<N>.json` (readable summary).
-- Offline or air-gapped: the run still completes. When the network is back, `rv-triage timestamp <log folder>`
-  re-verifies the chain and appends `timestamp_obtained` — earlier entries are never rewritten.
-- The TSA receives the chain head itself: the `entry_hash` of entry `#N` (already a SHA-256 digest) is the
-  message imprint of the request (hash algorithm SHA-256); it is not hashed a second time.
-- `verify-log` checks each token: imprint = stored head, and entry `#N` still exists with that hash (a missing
-  entry `#N` is reported as truncation), and the TSA's CMS signature (ESS signing-certificate, message digest,
-  RSA signature, critical `timeStamping`-only key usage); `verify-case` does the same for every run. The tokens
-  come from the log's `timestamp_obtained` entries: a recorded token whose `.tsr` or `.json` is missing is a
-  problem, never a skipped check.
-- The TSA certificate chain is validated only with `verify-log --tsa-ca <CA bundle>` (at genTime); without it
-  the output says "chain not checked". Revocation is never checked.
-- Independent signature/chain check: `openssl ts -verify -digest <head> -in timestamp-<N>.tsr -CAfile <TSA chain>`.
-  It does not check revocation (no CRL supplied, no OCSP query): establish the TSA certificate's revocation
-  status separately from CRL/OCSP evidence covering genTime (e.g. `openssl verify -crl_check -CRLfile <crl>
-  -attime <genTime-epoch> …`, or `rv-certcheck analyze --crl/--ocsp`).
-- `--no-timestamp` (or `RV_NO_TIMESTAMP=1`) disables it; tests use a local TSA (`tests/fake_tsa.py`).
-- **Limitation:** a timestamp proves the log existed at that time, not that its content is true.
-
-> **CRL dates and `-attime`.** OpenSSL applies `-attime` to the CRL as well, so `openssl verify -crl_check -attime <genTime-epoch>` only works with a CRL whose `thisUpdate`–`nextUpdate` interval contains genTime; a CRL issued after genTime fails with "CRL is not yet valid". To use a later CRL as evidence, check its signature (`openssl crl -in tsa-ca.crl -CAfile <TSA root.pem> -noout -verify`), then look up the TSA certificate's serial in it (`openssl crl -in tsa-ca.crl -noout -text`): absent, or listed with a revocation date after genTime, means not revoked at genTime. A CA may drop expired certificates from its CRLs, so for a TSA certificate that has since expired an absent serial is not conclusive: use a CRL from before its expiry, or an OCSP response archived at stamping time.
+- The token is stored next to the log: `timestamp-<N>.tsr` (DER) and `timestamp-<N>.json`.
+- The TSA receives the chain head itself (already a SHA-256 digest) as the message imprint; nothing else.
+- `verify-log` checks each token: imprint = stored head, entry `#N` still exists with that hash, and the TSA's CMS
+  signature. The TSA certificate chain is validated only with `verify-log --tsa-ca <CA bundle>`; revocation is
+  never checked (establish it from CRL/OCSP evidence covering genTime).
+- **Limitation:** a timestamp proves the log existed at that time, not that its content is true, and not that the
+  package matches the machine as it was (`TIMESTAMP_PROVES_EXISTENCE_ONLY`).
 
 ## Signed PDF reports
 
-`--sign-cert examiner.p12` (GUI: *4. Trust → Certificate*) signs every PDF — statistics, technical, summary and
-custody — with **your own** certificate. The password comes from the environment variable named by
-`--sign-pass-env` (default `RV_SIGN_PASSWORD`) or an interactive prompt; it is never written to any log.
-The log records `signing_certificate_loaded` with the certificate subject and SHA-256 fingerprint; a wrong password
-stops the run (`run_failed`, exit 1) before any evidence is read. HTML and JSON reports are not signed: their
-digests are in the audit chain, which is timestamped.
+`--sign-cert examiner.p12` (GUI: *5. Trust → Signing certificate*) signs every PDF — statistics, technical, summary
+and custody — with **your own** certificate. The password comes from the environment variable named by
+`--sign-pass-env` (default `RV_SIGN_PASSWORD`) or an interactive prompt; it is never written to any log. The log
+records `signing_certificate_loaded` (subject, SHA-256 fingerprint); a wrong password stops the run (`run_failed`,
+exit 1) **before** the collection starts. HTML, JSON and the package are not signed: their digests are in the
+audit chain, which is timestamped.
 
 ## Chain-of-custody form per item
 
-`--jurisdiction co` (default) writes, for each item, a Colombian *registro de cadena de custodia* in Spanish
-(fields of the Fiscalía manual, Ley 906 de 2004); `--jurisdiction fr` a French *fiche de scellé / suivi* in French
-(Code de procédure pénale art. 156 ff.). An English version is always added. The form is pre-filled from the run
-(case, item, size, both digests, UTC times, tool, examiner, audit entries) and leaves signature lines for the
-physical transfers. This is a working aid, not legal advice: check it against the current official form.
+`--jurisdiction co` (default) writes, for each packaged file and each file not collected, a Colombian *registro de
+cadena de custodia* in Spanish; `--jurisdiction fr` a French *fiche de scellé / suivi* in French. An English
+version is always added. The form is pre-filled from the run (case, item, size, digests, UTC times, tool,
+examiner, audit entries) and leaves signature lines for the physical transfers of the USB stick. This is a working
+aid, not legal advice: check it against the current official form.
 
 ## Actions recorded
 
-| Action | When | Key details |
-| --- | --- | --- |
-| `run_started` | first | tool, version, frontend, algorithms, langs, inputs, case |
-| `ui_*` | GUI only, before the run | input added/removed, hash selection, language, recursive, start clicked |
-| `environment_recorded` | | digests of `environment.json` |
-| `inputs_resolved` | | number of items and bytes |
-| `item_started` | each item | index, size, modified time |
-| `item_hashed` | each item | digests, bytes read, `mtime_unchanged` |
-| `item_error` | unreadable item | error message |
-| `item_analyzed` | each item | detected type, extension, findings, status |
-| `item_cancelled` / `run_cancelled` | on cancel | processed count |
-| `duplicate_group` | after the loop | hash, item indexes |
-| `hash_register_written` | | digests of `hashes.csv` |
-| `item_reports_written` | each item | digests of every report file |
-| `statistics_report_written` | | digests of statistics files |
-| `run_finished` / `run_failed` | last | totals, severities, elapsed |
+In the order they appear. Actions marked *collect* are written by [collect/phase.rs](../src/core/src/collect/phase.rs);
+the others by [run.rs](../src/core/src/run.rs).
+
+| Action | When | `item` | Key `details` |
+| --- | --- | --- | --- |
+| `run_started` | first | — | tool, version, frontend, algorithms, langs, case_id, out_dir, jurisdiction, tsa_url, sign_cert, `collect` (the options) |
+| `ui_*` | GUI only: every setting changed before Start, then `ui_start_clicked` | — | the new value, `at_utc` |
+| `environment_recorded` | | `environment.json` | its digests |
+| `signing_certificate_loaded` | with `--sign-cert` | certificate path | subject, `certificate_sha256` |
+| `collection_started` *collect* | | — | `options` (source kind and path, groups, users, allow_same_volume), `elevated`, `system_drive` |
+| `output_volume_checked` *collect* | live source only | the `--out` folder | `system_drive`, `same_volume`, `allowed` |
+| `run_failed` | output on the system volume refused, source cannot be opened, wrong certificate password | — | `reason` |
+| `source_opened` *collect* | | — | the source description: `kind`, `method`; live raw: `volume`, `device`, `fallback`; image: `path`, `layout` (`volume`/`mbr`), `partition_offset`; raw: `bytes_per_sector`, `cluster_size`, `file_record_size`, `volume_serial`, `volume_serial_64`, `total_size`, `ntfs_version`, `volume_label`; live API after a failed raw open: `raw_error`; folder: `root` |
+| `artifact_collected` *collect* | `volatile/system.json`, each volatile file, each copied file | source display path (`C:\Windows\…`) | `group`, `source` (volume path), `package`, `method`, `bytes`, `hashes`, `before` / `after` (`FileMeta`: size, `mft_record`, `si_*` and `fn_*` times, sparse/compressed/encrypted), `truncated_at`, `read_error`, `findings` |
+| `output_written` *collect* | right after each `artifact_collected`; then once per manifest | package path | `file` (`package/<rel>`), `kind` (`package_<group>` or `manifest`), `bytes`, `hashes` |
+| `volatile_captured` *collect* | live source with the `volatile` group | — | `available`, `started_utc`, `finished_utc`, counts of `processes`, `connections`, `sessions`, `services`, `partial` (what, incomplete, of, reason) |
+| `artifact_not_collected` *collect* | each target not in the package (volatile from an image/folder, an unlistable folder, a file that could not be read or written) | source display path | `group`, `source`, `reason`, `finding` |
+| `targets_resolved` *collect* | after the folders are listed | — | `files`, `per_group`, `unlisted` (folders that could not be listed) |
+| `collection_finished` *collect* | after both manifests | — | `collected`, `not_collected`, `bytes` (bytes copied from the source, snapshot files excluded), `cancelled` |
+| `inputs_resolved` | | — | `items` (packaged files to re-read), `bytes` |
+| `item_started` / `item_hashed` / `item_analyzed` | each packaged file, during the re-read | package path | index, size, source `modified_utc`; re-read digests, `bytes_read`; findings, status |
+| `item_error` | a packaged file that cannot be re-read (`UNREADABLE`) | package path | message |
+| `item_cancelled` / `run_cancelled` | on cancel | | processed count |
+| `hash_register_written` | | `hashes.csv` | its digests |
+| `item_reports_written` | each item (packaged or not collected) | path | digests of every report file |
+| `timestamp_obtained` / `timestamp_pending` | with a TSA | token file | covers_seq, gen_time, tsa / reason |
+| `statistics_report_written` | | — | digests of the statistics files |
+| `run_finished` | last | — | items, bytes, errors, elapsed, counts per severity, cancelled |
 
 ## Evidence handling
 
 ```mermaid
 flowchart LR
-    O[("Original media")] -->|write blocker + imaging tool| C[("Verified working copy")]
-    C -->|read-only open| T["RV Triage"]
-    T --> L["logs/"]
-    T --> R["reports/"]
-    L & R --> K["Case file<br/>(keep together)"]
+    U[("USB stick<br/>verified rv-triage")] -->|run as administrator| M["Live machine<br/>source opened read-only"]
+    M -->|"--out on the USB / network drive"| P[("package + logs + reports")]
+    P -->|seal, custody form| T["Transport"]
+    T --> V["Lab: verify-log<br/>(re-hashes the package)"]
+    V --> H["rv-hashinv scan<br/>--case-dir CASE"]
 ```
 
-- Files are opened with read-only access; modification times are compared before and after hashing
-  (`mtime_unchanged` in `item_hashed`).
-- Symbolic links are never followed (no escape outside the selected folders).
-- The tool does not replace imaging tools or write blockers: run it on a verified copy.
+- Sources are opened read-only: the raw volume with `File::open` on `\\.\C:` (read access, other processes keep
+  sharing), files with `File::open`; no source implementation opens anything for writing or changes a timestamp
+  ([source.rs](../src/core/src/collect/source.rs)). The volatile capture writes nothing to the machine: no files, no
+  registry, no ETW or WMI sessions, no services ([volatile.rs](../src/core/src/collect/volatile.rs)).
+- Links are never followed: symlinks in a folder source, reparse points (junctions, symbolic links) on NTFS.
+- Each file is stat'ed before and after the copy; a change is a `CHANGED_DURING_COPY` finding, not a silent
+  difference. The package copy is flushed with `sync_all` and read back.
+- What the tool cannot avoid — its own process, prefetch and Amcache entries, USB device records, the event-log
+  records of the logon — is listed in [theory.md A5](theory.md#a5-the-tools-own-traces) and in the
+  `EXECUTION_LEAVES_TRACES` limitation of every report. Note the start time of the run (`run_started.ts_utc`).
 
 ## Mapping to ISO/IEC 27037:2012
 
+Clause titles verified from the standard's table of contents; clause contents are summarised from secondary
+sources (see [admissibility.md §6.1](admissibility.md#61-isoiec-270372012--identification-collection-acquisition-and-preservation-of-digital-evidence)).
+
 | 27037 principle / activity | How RV Triage supports it |
 | --- | --- |
-| Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash; `verify-log` checks the chain and its end against the timestamp and the case log, and re-hashes every output the log records |
-| Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input → same hashes |
-| Reproducibility (5.3.4) | Independent verifier (`tests/verify_chain.py`), standard algorithms, and a second implementation of the tool (the other profile) that numbers, hashes and verifies identically |
-| Justifiability (5.3.5) | Every finding states what it shows and what it does **not** prove; limitations in every report |
-| Preservation (7.1.4) | Read-only access; hashes of every file and of every report produced |
-| Documentation / chain of custody | Hash register, reports, and log folder form the record of the examination |
-
-Colombian practice (Ley 906 de 2004, Manual de cadena de custodia) and French practice (Code de procédure
-pénale, art. 156 ff. for expertise) both expect the examiner to document the method and preserve integrity;
-the log folder plus the reports are that documentation for this step of the examination.
+| Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash; `verify-log` checks the chain, its end against the timestamp, and re-hashes every packaged file and report |
+| Repeatability (5.3.3) | `environment.json` records the exact tool and dependency versions; on a static source (image, folder) the same options give the same package digests (the sample's `expected_hashes.csv`) |
+| Reproducibility (5.3.4) | Independent verifier (`tests/verify_chain.py`); the sample digests are computed independently with Python (`make_expected.py`); standard algorithms. A **live** collection cannot be reproduced: the machine changes — hence the before/after stat, the order of volatility and the timestamp |
+| Justifiability (5.3.5) | Every finding states what it shows and what it does **not** prove; 6 limitations in every report; method per file (`raw`/`api`/`snapshot`) in the manifest |
+| Live acquisition / volatile data (acquisition clauses, see admissibility §8) | Volatile first; the tool's footprint documented; `system.json` records host clock, time zone, boot time and elevation |
+| Preservation | Read-only sources; digests taken during the copy and on the re-read; package and reports hashed in the log |
+| Documentation / chain of custody | Manifest, hash register, reports, custody forms and the log folder form the record of the collection |

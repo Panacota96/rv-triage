@@ -10,7 +10,9 @@
 > **Not legal advice.** This page maps legal and technical requirements to what RV Triage actually does, so that
 > an examiner, a lawyer or an opposing expert can see where the tool helps and where it does not. It was prepared
 > from a sourced research note dated 2026-10-21 (pass 2: verification) and **must be reviewed by counsel in each jurisdiction before it is
-> relied on or quoted**. Status: draft for counsel review.
+> relied on or quoted**. Status: draft for counsel review. Section 8 (live response) was added on 2026-11-15 for the
+> collection tool; its RFC 3227 references were checked against the RFC text that day, its ISO/IEC 27037 live-acquisition
+> references were not (paywalled).
 
 ## Contents
 
@@ -21,6 +23,7 @@
 - [5. France and the European Union](#5-france-and-the-european-union)
 - [6. International standards](#6-international-standards)
 - [7. United States and United Kingdom](#7-united-states-and-united-kingdom)
+- [8. Live response: RFC 3227, ISO/IEC 27037 and the tool's footprint](#8-live-response-rfc-3227-isoiec-27037-and-the-tools-footprint)
 - [Consolidated gap list](#consolidated-gap-list)
 - [Examiner checklist before filing a report](#examiner-checklist-before-filing-a-report)
 - [Sources](#sources)
@@ -63,8 +66,8 @@ PRIS content.
 
 | Key | Feature | Where it is implemented (file / command) |
 | --- | --- | --- |
-| F1 | Read-only evidence access (software level), one sequential read per file | `File::open` in [src/core/src/run.rs](../src/core/src/run.rs); `mtime_unchanged` in `item_hashed`; symbolic links never followed ([src/core/src/input.rs](../src/core/src/input.rs)) |
-| F2 | Hashing with 1 or 2 algorithms (md5, sha1, sha256, sha512, sha3-256, blake3) in one read | [src/core/src/hash.rs](../src/core/src/hash.rs); `scan --hash`; `logs/<RUN-ID>/hashes.csv` |
+| F1 | Read-only source access (software level), one sequential read per file, links never followed | Sources opened read-only: raw volume `\\.\C:` and image with `File::open`, files with `File::open` ([collect/source.rs](../src/core/src/collect/source.rs), [collect/ntfs_source.rs](../src/core/src/collect/ntfs_source.rs)); reparse points and symlinks never followed ([collect/ntfs/volume.rs](../src/core/src/collect/ntfs/volume.rs)); stat before/after each copy (`CHANGED_DURING_COPY`); output refused on the system volume ([collect/phase.rs](../src/core/src/collect/phase.rs)) |
+| F2 | Hashing with 1 or 2 algorithms (md5, sha1, sha256, sha512, sha3-256, blake3) in the same read as the copy, then a re-read of the packaged copy | [src/core/src/hash.rs](../src/core/src/hash.rs), [collect/copy.rs](../src/core/src/collect/copy.rs), [run.rs](../src/core/src/run.rs) (`COPY_REREAD_MISMATCH`); `collect --hash`; `package/manifest.csv`, `logs/<RUN-ID>/hashes.csv` |
 | F3 | SHA-256 hash-chained audit log + independent verifier | [src/core/src/audit.rs](../src/core/src/audit.rs); `rv-triage verify-log`; [tests/verify_chain.py](../tests/verify_chain.py) |
 | F4 | `environment.json`: tool, compiler and dependency versions, OS, host, user, command line | [src/core/src/env.rs](../src/core/src/env.rs), [src/core/build.rs](../src/core/build.rs) |
 | F5 | RFC 3161 timestamp of the audit chain head | [src/core/src/trust.rs](../src/core/src/trust.rs); `--tsa-url`, `--no-timestamp`, `rv-triage timestamp` |
@@ -73,27 +76,30 @@ PRIS content.
 | F8 | Findings state what they show **and** what they do not prove; observations only | [i18n/en.json](../i18n/en.json) (`findings`), es/fr; [src/core/src/analyzer.rs](../src/core/src/analyzer.rs) |
 | F9 | Declared limitations, printed in every report | `LIMITATIONS` in [src/core/src/report/mod.rs](../src/core/src/report/mod.rs); [i18n/en.json](../i18n/en.json) (`limitations`) |
 | F10 | Known-answer self-test (hash algorithms only) | `rv-triage self-test` |
-| F11 | Synthetic sample evidence with expected results | [examples/sample/](../examples/README.md): 3 files, `expected_hashes.csv` (Python `hashlib`/`blake3`), expected summary |
+| F11 | Synthetic sample source with expected results | [examples/sample/](../examples/README.md): a folder laid out like `C:\` with 22 placeholder files, `expected_hashes.csv` (Python `hashlib`) and `expected_findings.json`, expected summary; a synthetic NTFS volume image for the raw reader (`src/core/tests/fixtures`, provenance in [NOTICE](../NOTICE)) |
 | F12 | Test oracles (independent implementations) | [tests/verify_chain.py](../tests/verify_chain.py) re-checks the chain, re-hashes the evidence and every output the audit log records with Python (in CI); [tests/validate_reports.py](../tests/validate_reports.py) JSON Schemas (in CI); pyHanko's validator on every signed PDF ([tests/validate_pdf_signature.py](../tests/validate_pdf_signature.py), in CI); OpenSSL for timestamps (manual); the Python profile of this tool: a committed case folder it wrote is verified in CI ([tests/golden/](../tests/golden/regenerate.py)), and the live cross-profile test (case folders and item numbering) runs with `RV_CROSS_PROJECT` |
-| F13 | Robustness tests | cancel, unreadable input, missing input, three algorithms, edited/deleted/re-ordered log, tampered case log and registry, lock contention ([src/core/src/run.rs](../src/core/src/run.rs), [src/core/src/case.rs](../src/core/src/case.rs), [src/cli/tests/cli.rs](../src/cli/tests/cli.rs)); no fuzzing |
+| F13 | Robustness tests | cancel, read error mid-file (`PARTIAL_READ`), unsafe package paths, compressed data refused, MFT record reuse, junctions not followed, sparse and valid-data-length reads, aligned device reads only, missing source, three algorithms, edited/deleted/re-ordered log ([collect/](../src/core/src/collect/mod.rs) unit tests, [collect/ntfs/tests.rs](../src/core/src/collect/ntfs/tests.rs), [src/core/src/run.rs](../src/core/src/run.rs), [src/cli/tests/cli.rs](../src/cli/tests/cli.rs)); no fuzzing of the NTFS parser |
 | F14 | CI on Windows and Linux | [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
 | F15 | SBOM and build provenance | [.github/workflows/release.yml](../.github/workflows/release.yml) (CycloneDX, `actions/attest-build-provenance`) |
 | F16 | Versioned releases with `SHA256SUMS`; pinned toolchain | [.github/workflows/release.yml](../.github/workflows/release.yml); [rust-toolchain.toml](../rust-toolchain.toml); [installation.md](installation.md#2-verify-the-download) |
 | F17 | Source auditable by customers and opposing experts; local use only, no redistribution | [LICENSE](../LICENSE) (Rakvor Source-Auditable Licence, draft pending legal review); [NOTICE](../NOTICE) |
-| F18 | Shared case folder: evidence registry, hash-chained case log, cross-linked run chains, `verify-case` | [src/core/src/case.rs](../src/core/src/case.rs); `--case-dir`, `--evidence`, `rv-triage verify-case`; [case-folder.md](case-folder.md) |
+| F18 | Shared case folder: evidence registry, hash-chained case log, cross-linked run chains, `verify-case` | Not written by `collect` in v0.1: the package is registered by **rv-hashinv** ([case-folder.md](case-folder.md)); `rv-triage verify-case` checks any case folder ([src/core/src/case.rs](../src/core/src/case.rs)) |
 
 <!-- forge:domain -->
-Domain features named below: **type detection by magic bytes** (15 signatures, `EXTENSION_MISMATCH`,
-`EXECUTABLE_CONTENT`), **duplicate detection** by primary digest, and the **intake role**: this tool writes the
-case registry that every later tool verifies against ([theory.md B4–B5, B7](theory.md#b4-type-detection-by-magic-bytes-and-extension-mismatch)).
+Domain features named below: **live collection** of volatile data and selected Windows artifacts in order of
+volatility, the **raw NTFS reader** (locked files, `$FILE_NAME` times, valid data length; compressed, encrypted and
+reparse data refused), the **copy discipline** (one read hashed while copied, stat before and after, re-read of the
+package) and the **collection role**: the package is registered later by rv-hashinv
+([theory.md B3–B8](theory.md#b3-volume-access-boot-sector-mbr-and-aligned-reads)). Live-response requirements are in
+[section 8](#8-live-response-rfc-3227-isoiec-27037-and-the-tools-footprint).
 <!-- /forge:domain -->
 
 ## 2. Evidence lifecycle and where each control sits
 
 ```mermaid
 flowchart LR
-    A["Seizure / collection<br/>(police, client, party)"] --> B["Forensic copy<br/>write blocker, imager"]
-    B --> C["Intake<br/>rv-triage: registry + hashes"]
+    A["Live machine<br/>(mandate, consent)"] --> B["Live collection<br/>rv-triage: package + audit log"]
+    B --> C["Intake<br/>rv-hashinv: registry + hashes"]
     C --> D["Analysis<br/>analysis tools --case-dir"]
     D --> E["Examiner review<br/>reports, findings"]
     E --> F["Report<br/>signed PDF, timestamped log"]
@@ -139,14 +145,14 @@ Daubert/Kumho (to be verified) give the vocabulary opposing experts use.
 
 | Factor | What the tool offers (evidence an examiner can show) | Status |
 | --- | --- | --- |
-| **Testability** — can the method be tested? | Deterministic digests and findings ([theory.md B11](theory.md#b11-determinism-and-repeatability)); sample with independently computed digests (F11); unit and integration tests on Windows and Linux (F14); tamper tests for both chains (F13); every digest can be re-computed with any standard utility (`sha256sum`, `Get-FileHash`) | met |
-| **Known or potential error rate, and limits** | Digests: published algorithms with known-answer tests (F10) and an independent re-computation in CI (F12). Type detection: every finding states what it does not prove (F8); 4 limitations in every report (F9); signature table and decision rule published ([theory.md B4](theory.md#b4-type-detection-by-magic-bytes-and-extension-mismatch)). **No measured false-positive / false-negative rates** for type detection (G5) | partial |
+| **Testability** — can the method be tested? | Deterministic package and digests on a static source (image, folder: [theory.md B8](theory.md#b8-the-copy-one-read-two-stats-one-re-read)); sample with independently computed digests (F11); a live machine cannot be re-collected identically (section 8); unit and integration tests on Windows and Linux (F14); tamper tests for both chains (F13); every digest can be re-computed with any standard utility (`sha256sum`, `Get-FileHash`) | met |
+| **Known or potential error rate, and limits** | Digests: published algorithms with known-answer tests (F10) and an independent re-computation in CI (F12). Copy errors are detected per file (`PARTIAL_READ`, `CHANGED_DURING_COPY`, `COPY_REREAD_MISMATCH`); every finding states what it does not prove (F8); 6 limitations in every report (F9); what the raw reader refuses is published ([theory.md B7](theory.md#b7-what-is-refused-and-why)). **The NTFS reader is tested on synthetic volumes only; no measured coverage on real Windows 10/11 volumes** (G5) | partial |
 | **Peer review / independent oracles** | Source auditable (F17); Python re-implementation of the chain and of the hashing (F12, in CI); pyHanko validation of every signed PDF (in CI); Python profile of the whole tool (identical findings and item numbering measured on the sample; its case folders verified in CI); OpenSSL for timestamps (manual). No publication or external review (G7) | partial |
 | **Standards controlling the operation** | FIPS 180-4/202, RFC 1321 for digests; RFC 3161, RFC 5652 for timestamps and signatures; ISO/IEC 27037 principles ([section 6.1](#61-isoiec-270372012--identification-collection-acquisition-and-preservation-of-digital-evidence)); release verification ([installation.md](installation.md)); examiner checklist (below). No enforced hash policy (G11); no formal SOP signed by the firm | partial |
-| **General acceptance** | Cryptographic hashing of evidence and file-signature identification are standard forensic practice; digests agree with standard utilities and with Python `hashlib` (F12) | met |
+| **General acceptance** | Cryptographic hashing of evidence and live triage collection in order of volatility (RFC 3227) are standard forensic practice; digests agree with standard utilities and with Python `hashlib` (F12) | met |
 | **Validation for intended use** (ISO/IEC 17025 §7.2.2 [V]; 27041 — to be verified) | Inputs exist (F10–F14) but there is **no per-release validation report** with plan, acceptance criteria, results and sign-off (G6) | gap |
 | **Verification by the user** before casework (17025 §7.2.1 [V]; 27041 — to be verified) | `self-test` + sample run with known expected summary ([installation.md](installation.md#6-first-run-self-test-and-sample)) | met |
-| **Reliable application in this case** (FRE 702(d), 2023 — [V]) | Every step of the run in the audit chain (F3), environment pinned (F4), case-folder cross-links (F18), timestamp (F5), signed report (F6) | met |
+| **Reliable application in this case** (FRE 702(d), 2023 — [V]) | Every step of the run in the audit chain (F3), environment pinned (F4), host clock and elevation in `system.json`, timestamp (F5), signed report (F6) | met |
 
 ## 4. Colombia
 
@@ -163,7 +169,7 @@ normograma mirror (arts. 366–453).
 | CO-P1 | Data messages are EMP/EF and enter the chain-of-custody regime | Art. 275 lit. g [V] | F7 per-item custody form; F2 identity by hash; F18 evidence id per item | met |
 | CO-P2 | Chain of custody evidences identity, original state, collection, preservation, packaging, sending, places and dates, changes by each custodian, everyone who had contact | Art. 254 [V]: "identidad, estado original, condiciones de recolección, preservación, embalaje y envío" | F2 (identity, state by hash); F3 (who, when, what); F18 (every tool run on the case in the case log); F7; physical packaging by the examiner | met (digital) / examiner (physical) |
 | CO-P3 | Everyone who packs, labels, hands over or receives records full name, cédula and position on the form | Art. 264 [V] | F7 transfer rows ask for "name, ID, signature" (cédula fits "ID"); **no field for position (cargo)**; F4 records OS user and host | partial |
-| CO-P4 | Recipient inspects the container and records its state; the perito records it on receipt | Arts. 263, 260 [V] | F7 column "Condition of packaging / media"; F2 at intake; analysis tools re-hash against the registry (F18) | met (digital) / examiner (seal) |
+| CO-P4 | Recipient inspects the container and records its state; the perito records it on receipt | Arts. 263, 260 [V] | F7 column "Condition of packaging / media"; F2 at collection, again at rv-hashinv intake; analysis tools re-hash against the registry (F18) | met (digital) / examiner (seal) |
 | CO-P5 | Each custodian prevents destruction, substitution, alteration, deterioration | Art. 261 [V]: "no pueda ser destruido, suplantado, alterado o deteriorado" | F1, F2, F3; F18 (`EVIDENCE_HASH_MISMATCH_WITH_CASE` in later tools) | met |
 | CO-P6 | Police and peritos certify the item is the one collected and was always in custody | Art. 265 [V] | F6 signed report citing F2/F3/F7 | met (support) / examiner (signs) |
 | CO-P7 | Authenticity = detected, fixed, collected, packed technically and kept in custody; without it, the proponent proves authenticity | Art. 277 [V] | F3, F7, F2, F18 | met |
@@ -174,11 +180,11 @@ normograma mirror (arts. 366–453).
 | CO-P12 | Party-retained report comes with a "certificación que acredite la idoneidad del perito" | Art. 413 [V] | None | examiner |
 | CO-P13 | Summary report disclosed ≥ 5 days before the hearing; inadmissible if the perito does not testify | Art. 415 [V] | F6 produces the report | examiner |
 | CO-P14 | Perito examined on instruments, principles, methods, and "corroboración … por otros expertos" | Art. 417 [V] | F4, F9, F12, F17; [theory.md](theory.md); validation dossier missing (G6) | partial |
-| CO-P15 | Court weighs competence, acceptance of principles, instruments, consistency | Art. 420 [V] | F12, F16, F17; hashing is generally accepted; type-detection error rates not measured (G5) | partial |
-| CO-P16 | Novel technique meets ≥ 1: verifiable; published and peer-reviewed; "se haya acreditado el nivel de confiabilidad"; academic acceptance | Art. 422 [V] | Hashing and file-signature identification are not novel; verifiable: F10, F11, F12 (criterion 1 met); reliability level of type detection not measured (G5) | partial |
+| CO-P15 | Court weighs competence, acceptance of principles, instruments, consistency | Art. 420 [V] | F12, F16, F17; hashing is generally accepted; raw-reader coverage on real volumes not measured (G5) | partial |
+| CO-P16 | Novel technique meets ≥ 1: verifiable; published and peer-reviewed; "se haya acreditado el nivel de confiabilidad"; academic acceptance | Art. 422 [V] | Hashing and raw NTFS acquisition are not novel; verifiable: F10, F11, F12 (criterion 1 met); reliability level of the NTFS reader on real volumes not measured (G5) | partial |
 | CO-P17 | Peritos have access to the EMP referred to in reports (enables opposing review) | Art. 416 [V] | F17 auditable source; F11 samples; F16 exact release; F18 registry with every digest | met |
 | CO-P18 | Data messages are documents; authenticated by certification of a digital-signature entity or "informe de experto" | Art. 424 #7, art. 426 [V] | F6 (expert report) with F2/F3 integrity evidence | met (expert route) |
-| CO-P19 | Documentary appraisal: "Que no haya sido alterado en su forma ni en su contenido" | Art. 432 #1 [V] | F2, F3, F18: no change **from intake onward**; earlier changes are outside this tool (F9) | met (from intake) |
+| CO-P19 | Documentary appraisal: "Que no haya sido alterado en su forma ni en su contenido" | Art. 432 #1 [V] | F2, F3, F18: no change **from collection onward**; the state of a file before it was read is outside this tool (F9) | met (from collection) |
 | CO-P20 | Best evidence: the original is required where it is part of custody or a technical study | Arts. 433–434 parágrafo [V] | F1 preserves; hashed working copy | examiner (custody of the original) |
 | CO-P21 | Defence and non-imputed persons may collect evidence and use private peritos | Arts. 267–268 [V] | F7 | context (Rakvor as defence expert) |
 | CO-P22 | Remnants of analysed material kept identified in an evidence store | Art. 262 [V] | F18 registry (evidence ids, paths, digests); F3 keeps the records | met (records) / examiner (storage) |
@@ -194,13 +200,13 @@ needs its authenticity established, possibly *de oficio* (art. 272).
 | --- | --- | --- | --- | --- |
 | CO-C1 | Report clear, precise, exhaustive, detailed; explains exams, methods, experiments, technical bases | Art. 226 [V] | F6 technical review, F8, F9, F4; [theory.md](theory.md) | met (template) / examiner |
 | CO-C2 | Expert declares under oath (by signing) that the opinion is "independiente y corresponde a su real convicción profesional"; attaches documents and proof of competence | Art. 226 [V] | F6 signature; no oath wording in the template | examiner |
-| CO-C3 | Ten disclosures (#1–#10), incl. whether methods differ from prior reports (#8) and regular practice (#9) and "Relacionar y adjuntar los documentos e información utilizados" (#10) | Art. 226 #1–10 [V]; look-back periods of #4/#5 **to be verified** | #8, #9: F4 and F16 pin the method version; #10: F3 log, `hashes.csv`, F18 intake registry | met (#8–10) / examiner (#1–7) |
+| CO-C3 | Ten disclosures (#1–#10), incl. whether methods differ from prior reports (#8) and regular practice (#9) and "Relacionar y adjuntar los documentos e información utilizados" (#10) | Art. 226 #1–10 [V]; look-back periods of #4/#5 **to be verified** | #8, #9: F4 and F16 pin the method version; #10: F3 log, `hashes.csv`, `package/manifest.json`; F18 registry after the rv-hashinv intake | met (#8–10) / examiner (#1–7) |
 | CO-C4 | Dictamen from an "institución o profesional especializado" | Art. 227 [V] | None | examiner |
 | CO-C5 | Opposing party may summon the expert or file a competing dictamen; no attendance, no value | Art. 228 [V] | F11, F12, F16, F17 enable reproduction | met (support) |
 | CO-C6 | Sana crítica on soundness, clarity, exhaustiveness, precision, foundations, competence | Art. 232 [V] | F8, F9; validation dossier missing (G6) | partial |
 | CO-C7 | Objectivity and impartiality; no fees contingent on the outcome | Art. 235 [V]: "se prohíbe pactar cualquier remuneración que penda del resultado del litigio" | None | examiner (commercial terms) |
 | CO-C8 | Data messages count only in native format or exact reproduction; a printout is an ordinary document | Art. 247 [V] | F1 native preserved; F2 proves exactness of copies | met / examiner (produce the natives) |
-| CO-C9 | Data-message documents presumed authentic; disowned ones need authenticity established, possibly *de oficio* | Arts. 244, 272 [V] | F2, F3, F18 establish integrity from intake; F8 keeps findings non-conclusive | met (support) |
+| CO-C9 | Data-message documents presumed authentic; disowned ones need authenticity established, possibly *de oficio* | Arts. 244, 272 [V] | F2, F3 establish integrity from collection; F18 from intake; F8 keeps findings non-conclusive | met (support) |
 | CO-C10 | *Tacha de falsedad*: judge orders a *cotejo pericial* | Art. 270 [V] | F2 comparison of digests; analysis tools | met (support) |
 
 ### 4.3 Ley 527 de 1999 (data messages, e-commerce, digital signatures)
@@ -211,7 +217,7 @@ refers to the repealed Código de Procedimiento Civil, now the CGP.
 | # | Requirement | Source | How the tool meets it | Status |
 | --- | --- | --- | --- | --- |
 | CO-L1 | Evidential effect not denied solely because information is a data message | Arts. 5, 10 [V] | None | context |
-| CO-L2 | "Original" satisfied by a "garantía confiable de que se ha conservado la integridad de la información" since first generated in final form | Art. 8 lit. a [V] | F2 at intake; F3 continuity; F5 time anchor; F18 later re-verification | met from intake onward; integrity **before** intake cannot be proven by the tool (F9) |
+| CO-L2 | "Original" satisfied by a "garantía confiable de que se ha conservado la integridad de la información" since first generated in final form | Art. 8 lit. a [V] | F2 at collection; F3 continuity; F5 time anchor; F18 later re-verification | met from collection onward; integrity **before** the collection cannot be proven by the tool (F9) |
 | CO-L3 | Integrity = "completa e inalterada", except endorsements or changes inherent to communication, storage, display | Art. 9 [V] | F2: any change of one bit changes the digest. The tool cannot tell an inherent change (re-encoding by a transfer) from another; the examiner explains a mismatch | met (detection) / examiner (explanation) |
 | CO-L4 | Weight by sana crítica: reliability of generation, archiving, communication, integrity, originator identification | Art. 11 [V] | Integrity: F2, F3, F5. Process: F4, F10–F12. Originator: not attributed | partial — the tool cannot attribute authorship |
 | CO-L5 | Retention: accessible; original format or one that "reproduce con exactitud"; origin, destination, date, time kept | Art. 12 [V] | F1; F2; path, size and modification time recorded per item | met |
@@ -269,14 +275,14 @@ content **to be verified**.
 
 | # | Requirement | Source | How the tool meets it | Status |
 | --- | --- | --- | --- | --- |
-| CO-J1 | *Integralidad*: received complete | CSJ Civ. 16-12-2010 via cartilla Tabla 9 [S] | F2 (size and digest at intake) | met (from intake) |
-| CO-J2 | *Inalterabilidad*: unchanged after its final form | Same [S] | F2, F3, F5, F18 | met (from intake) |
+| CO-J1 | *Integralidad*: received complete | CSJ Civ. 16-12-2010 via cartilla Tabla 9 [S] | F2 (size and digest at collection) | met (from collection) |
+| CO-J2 | *Inalterabilidad*: unchanged after its final form | Same [S] | F2, F3, F5, F18 | met (from collection) |
 | CO-J3 | *Rastreabilidad*: original source traceable | Same [S] | F18 registry records path, size, digests, run and audit entry of registration; F7, F3. The source **of the copy** must be recorded by the examiner | partial |
 | CO-J4 | *Recuperabilidad*: accessible for later consultation | Same [S] | F1; F16 (tool remains re-runnable) | met |
 | CO-J5 | *Conservación*: loss and destruction prevented (forensic image) | Same [S] | F2 for images or copies | met / examiner (storage) |
 | CO-J6 | *Autenticidad*: mechanisms identify the author and link them to the content | Same [S] | Not attributed by this tool | examiner |
 | CO-J7 | Never access original media without write-blocking (access alters metadata — Raúl Reyes/INTERPOL); desynchronised clocks undermine traceability | Cartilla §9.4, §9.5.1, §9.5.2 [V] | F1 is software read-only, **not** a hardware write-blocker; F4 does not record the clock source or offset | partial (G10, G12) |
-| CO-J8 | Reliability: tested procedures, known tool error rates, two tools to cross-check, audits of tool efficacy | Cartilla §9.10.1 (Jeimy Cano questions) [V] | F12 (second implementation in CI); F10, F11; type-detection error rates not measured (G5) | partial |
+| CO-J8 | Reliability: tested procedures, known tool error rates, two tools to cross-check, audits of tool efficacy | Cartilla §9.10.1 (Jeimy Cano questions) [V] | F12 (independent verifier in CI); F10, F11; raw-reader coverage not measured (G5); cross-check: compare the package with an image of the disk | partial |
 
 ## 5. France and the European Union
 
@@ -327,7 +333,7 @@ writing ([S], via CMS). Art. 1358 and CPC arts. 233, 237, 238, 263–284-1, 145:
 
 | # | Requirement | Source | How the tool meets it | Status |
 | --- | --- | --- | --- | --- |
-| FR-C1 | Electronic writing has probative force only if the author is identifiable and integrity is guaranteed (applies to Rakvor's reports and to the files examined) | C. civ. art. 1366 [V] | Reports: F6 (identity), F2, F3, F5 (integrity). Examined files: integrity from intake (F2, F18); author not attributed | met / partial |
+| FR-C1 | Electronic writing has probative force only if the author is identifiable and integrity is guaranteed (applies to Rakvor's reports and to the files examined) | C. civ. art. 1366 [V] | Reports: F6 (identity), F2, F3, F5 (integrity). Collected files: integrity from collection (F2, F3); author not attributed | met / partial |
 | FR-C2 | Reliable identification process linked to the act; presumption needs decree conditions | C. civ. art. 1367 al. 2 [V] | F6 (CMS, examiner certificate) | partial — no presumption (G3) |
 | FR-C3 | Presumption only for qualified electronic signatures (eIDAS arts. 26, 28, 29) | Décret 2017-1416 art. 1 [V] | F6 is not a QES unless a qualified certificate on a QSCD is used (RSA `.p12` files only today) | gap (G3) |
 | FR-C4 | Technician acts personally, objectively, impartially; no legal assessment | CPC arts. 233, 237, 238 — **to be verified** | F8 (no legal verdict); F4 records the operator | met (support) / examiner |
@@ -353,9 +359,9 @@ quoted article text is [V]):
   (assuming SHA-256 collision resistance).
 - **Does not give:** the art. 41(2) presumption "of the accuracy of the date and the time it indicates and the
   integrity of the data to which the date and time are bound" (qualified ETS from a QTSP on an EU Trusted List,
-  art. 42); any statutory status in Colombia (Ley 527 art. 30 #5); proof of anything before intake; proof of when
+  art. 42); any statutory status in Colombia (Ley 527 art. 30 #5); proof of anything before the collection; proof of when
   individual entries were written (only the head is stamped); coverage of the entries written after the token (the
-  statistics report and `run_finished`, [theory.md B8](theory.md#b8-rfc-3161-trusted-timestamp)).
+  statistics report and `run_finished`, [theory.md B12](theory.md#b12-audit-chain-and-timestamp)).
 - **Consequence:** Rakvor carries the burden of showing the TSA's reliability: policy OID, clock source,
   certificate chain and revocation at stamping time. `verify-log` verifies the TSA's CMS signature on the token
   and, only with `--tsa-ca <TSA roots>`, the certificate chain at genTime; it does **not** check revocation,
@@ -418,11 +424,11 @@ operator, etc.)"; 3.25 verification function: "No two non-identical data sets sh
 | ISO-4 | Justifiability: each decision and method documented and justified | §5.3.5 [V title / S content] | F8, F9; [theory.md](theory.md); method-selection rationale belongs in the examiner's report | partial |
 | ISO-5 | A copy includes verification means, embedded or independent | §3.6 [V] | F2 digests stored with each item (`hashes.csv`, F18 registry) and each report; F3; independent verifier | met |
 | ISO-6 | Verification function must not match non-identical data (collision-resistant) | §3.25 [V] (MD5, SHA-1 cited only as examples) | F2 allows `md5,sha1` with no SHA-2/3 algorithm | gap (G11) |
-| ISO-7 | Avoid spoliation and tampering | §3.19, §3.21 [V]; §6.5 "Use reasonable care" [V title] | F1 | met (logical) / partial (G10) |
+| ISO-7 | Avoid spoliation and tampering | §3.19, §3.21 [V]; §6.5 "Use reasonable care" [V title] | F1; output off the system volume; footprint documented (section 8) | met (logical) / partial (G10, G23) |
 | ISO-8 | Chain-of-custody record | §6.1 [V title]; content **to be verified** | F7, F3, F18 | met (subject to content check) |
 | ISO-9 | Documentation of all actions | §6.6 [V title] | F3, F4 | met |
 | ISO-10 | Competency of DEFR and DES | §3.7–3.8 [V]; §6.4 [V title] | None | examiner |
-| ISO-11 | Acquisition procedures for computers and media | §7.1.3 [V title] | Not an imager: intake of copies already acquired | partial (scope, G15) |
+| ISO-11 | Acquisition procedures for computers and media | §7.1.3 [V title] | Live acquisition of selected artifacts (not a disk or memory image): section 8 | partial (scope, G15, G27) |
 
 ### 6.2 ISO/IEC 27041, 27042, 27043 (2015), ISO 21043, ISO/IEC 17025:2017, Global ACI-TECH-1-004
 
@@ -443,7 +449,7 @@ UKAS bulletin 2026-08-17).
 | ISO-14 | Verification by the user before casework | 17025 §7.2.1 title [V]; 27041 — **to be verified** | `self-test` + sample run ([installation.md](installation.md#6-first-run-self-test-and-sample)) | met |
 | ISO-15 | Interpretation states limitations and alternative explanations | 27042 abstract [V]; clause text and ISO 21043-4 — **to be verified** | F8 ("does not prove" = alternative explanations), F9 | met |
 | ISO-16 | Technical records sufficient to repeat the work; equipment records include the software version | 17025 §7.5 [V title]; §6.4.13 [V] | F3, F4 (tool and dependency versions in every run), F16, F18; hashed reports | met |
-| ISO-17 | Measurement uncertainty / error characterisation where relevant | 17025 §7.6 [V title] | Digests: exact. Type detection: not measured | gap (G5) |
+| ISO-17 | Measurement uncertainty / error characterisation where relevant | 17025 §7.6 [V title] | Digests: exact. NTFS reader coverage: not measured | gap (G5) |
 | ISO-18 | Accreditation of the laboratory scope (COFRAC, ONAC) | 17025:2017 [V]; Global ACI-TECH-1-004, formerly ILAC G19 [S] | None | gap (G1) |
 
 ## 7. United States and United Kingdom
@@ -465,21 +471,47 @@ Mitigation Analysis v2.0 (2018-11-20). **NIST CFTT** [V]: hashing and PDF analys
 | US-2 | Product of reliable principles and methods | FRE 702(c) [V] | F10–F13 + a validation report (missing) | partial (G6) |
 | US-3 | Reliable application to the facts (2023 emphasis) | FRE 702(d), amended 2023 [V] | F3 each step; F4; F10 at installation; F8 (no overreach) | met |
 | US-4 | Daubert: testability | Daubert — **to be verified** | F11, F12, F13 | met |
-| US-5 | Daubert: peer review and publication | Daubert | Hashing algorithms are published standards; this tool's type-detection rule is published only here | partial (G7) |
-| US-6 | Daubert: known or potential error rate; SWGDE: "relying solely on error rates is insufficient" — document error sources, mitigations and remaining limitations | Daubert (**to be verified**); SWGDE Error Mitigation Analysis v2.0 [V] | Digests: exact (known-answer tests). Type detection and intake edge cases: not measured; no written error-mitigation analysis | gap (G5) |
+| US-5 | Daubert: peer review and publication | Daubert | Hashing algorithms are published standards; this tool's collection rules are published only here | partial (G7) |
+| US-6 | Daubert: known or potential error rate; SWGDE: "relying solely on error rates is insufficient" — document error sources, mitigations and remaining limitations | Daubert (**to be verified**); SWGDE Error Mitigation Analysis v2.0 [V] | Digests: exact (known-answer tests). Raw-reader edge cases on real volumes: not measured; error sources and mitigations listed in [theory.md B7–B8](theory.md#b7-what-is-refused-and-why), no formal error-mitigation analysis | gap (G5) |
 | US-7 | Daubert: standards controlling operation | Daubert | F10, F16, the checklist below; hash policy (G11) | partial |
 | US-8 | Daubert: general acceptance | Daubert | F12 agreement with accepted tools (digests vs standard utilities and Python `hashlib`) | met |
 | US-9 | Authentication by "evidence describing a process or system and showing that it produces an accurate result" | FRE 901(b)(9) [V] | F10, F11, F12 records | met |
 | US-10 | Self-authentication of copied data "authenticated by a process of digital identification" via a qualified person's certification | FRE 902(14) [V]; 2017 note [S] | F2, F18; **no certification template** in the reports | partial (add template) |
 | US-11 | Self-authentication of records generated by an electronic process via certification | FRE 902(13) [V] | F6, F3; no certification template | partial (add template) |
-| US-12 | Test before casework and re-test at every revision, preferably by a tester independent of the developer, on a dataset other than the development one; record scope, tester, date, procedure, datasets with expected results, anomalies, limitations | SWGDE 18-Q-001-2.1 §4, §5.1.3, §5.6, §6, App. A [V]; NIST CFTT methodology [V] | F10, F11 (known dataset), F12 (comparison), F13, F14, F16. Missing: a §6-style test record per release, independent tester, separate test dataset | partial (G6) |
+| US-12 | Test before casework and re-test at every revision, preferably by a tester independent of the developer, on a dataset other than the development one; record scope, tester, date, procedure, datasets with expected results, anomalies, limitations | SWGDE 18-Q-001-2.1 §4, §5.1.3, §5.6, §6, App. A [V]; NIST CFTT methodology [V] | F10, F11 (known dataset), F12 (comparison), F13, F14, F16; manual live checks in the release checklist ([development.md](development.md#release-checklist-manual)). Missing: a §6-style test record per release, independent tester, separate test dataset, tests on real Windows volumes | partial (G6) |
 | US-13 | Hash choice: SWGDE finds MD5 and SHA-1 appropriate for integrity verification if the hash is securely recorded, recommends that "all users transition to SHA2 and SHA3", and requires SHA-2/SHA-3 to identify files without inspection; BLAKE3 is not NIST-approved | SWGDE 12-f-002 v1.0 [V]; NIST FIPS 180-4 / 202 — **to be verified** | F2 (default sha256; no enforced policy); duplicates use the first algorithm | partial (G11) |
 | UK-1 | Methods fit for purpose and validated before implementation (DIG 100) | FSR Code v2 §24.1.1, §24.3.1, §24.3.7 [V]; Table 1 DIG 100 [V] | F10–F16 | gap (G1, G6) if UK work is in scope |
+
+## 8. Live response: RFC 3227, ISO/IEC 27037 and the tool's footprint
+
+Context: a live collection changes the system it collects from — running any program does — and cannot be repeated,
+because the system keeps changing. Guidance therefore asks the examiner to collect the most volatile data first, to
+minimise and document the changes, and to use trusted tools from protected media. **RFC 3227**, *Guidelines for
+Evidence Collection and Archiving* (D. Brezinski, T. Killalea, February 2002, BCP 55), was checked against the RFC
+Editor text on 2026-11-15 [V]: §2.1 gives the order of volatility (registers and cache; routing table, ARP cache,
+process table, kernel statistics, memory; temporary file systems; disk; remote logging and monitoring data; physical
+configuration and network topology; archival media); §2.2 lists things to avoid, including "Don't trust the
+programs on the system"; §2.4 says evidence must be admissible, authentic, complete, reliable and believable; §5
+asks for tools on read-only media, prepared in advance and statically linked. The RFC says it is not meant to be
+followed rigidly and may not suit every jurisdiction [V]. ISO/IEC 27037 addresses the acquisition of running
+systems in its acquisition clauses; their content is paywalled and **to be verified** (only clause titles were
+checked, section 6.1).
+
+| # | Requirement | Source | How the tool meets it | Status |
+| --- | --- | --- | --- | --- |
+| LR-1 | Collect in order of volatility | RFC 3227 §2.1 [V] | Host facts, then connections → processes → sessions → services, then files ([theory.md A2](theory.md#a2-order-of-volatility-the-fast-things-first), [collect/phase.rs](../src/core/src/collect/phase.rs)); the source volume is opened (boot sector and `$UpCase` read) before the volatile capture, a sub-second step | met |
+| LR-2 | Minimise changes; avoid programs that update access times of all files | RFC 3227 §2, §2.2 [V] | F1; output refused on the system volume; raw reads do not touch file metadata; nothing written to the machine by the tool. Residual: Windows records the execution and the USB device; files opened through the file API (not elevated, executables hashed for `processes.json`) may get their access time updated where the machine updates it (G23) | partial (G23) |
+| LR-3 | Do not trust the programs on the system; run tools from protected media | RFC 3227 §2.2, §5 [V] | A single statically linked executable (static C runtime) run from the USB stick; it calls Windows APIs, which a kernel-level compromise can falsify (`NO_MEMORY_IMAGE`) | partial (G27) |
+| LR-4 | Completeness: say what was not collected | RFC 3227 §2.4 "complete" [V] | Every target not collected is in `manifest.json` with the reason and gets its own report; incomplete volatile lists get `VOLATILE_PARTIAL` | met |
+| LR-5 | Document each step, times and clock drift, people involved | RFC 3227 §2, §3.2 [V] | F3 (every step, actor, UTC time); `system.json` (machine clock local and UTC, time zone, boot time); clock drift must be noted by the examiner against a reference (G12) | partial (G12) |
+| LR-6 | Chain of custody of what was collected | RFC 3227 §4.1 [V]; ISO/IEC 27037 §6.1 [V title] | F7 per file, F2 digests, F3; physical custody of the stick by the examiner | met (digital) / examiner (physical) |
+| LR-7 | Repeatability and reproducibility of a live acquisition | ISO/IEC 27037 §5.3.3–5.3.4 [V title / S content]; live-acquisition clauses **to be verified** | Not repeatable by nature; justified by documenting the state (before/after stat per file, timestamps of the capture, `CHANGED_DURING_COPY`) and by re-verifiable digests of the package (F2, F3) | partial (inherent) |
+| LR-8 | Document the tool's own footprint so it is not mistaken for user activity | RFC 3227 §2.2 [V] (effects of tools); ISO/IEC 27037 — **to be verified** | [theory.md A5](theory.md#a5-the-tools-own-traces); limitation `EXECUTION_LEAVES_TRACES` in every report; `run_started.ts_utc` gives the time | met (documented) / gap (not measured, G23) |
 
 ## Consolidated gap list
 
 G1–G17 come from the research note (numbering shared by every Rakvor tool); G18 onwards were found while
-documenting the code of this commit. Owners: **Eng.** = engineering (tool), **Counsel**, **Examiner**, **Firm** =
+documenting the code of this commit (G27–G29 for the collection tool). Owners: **Eng.** = engineering (tool), **Counsel**, **Examiner**, **Firm** =
 Rakvor management.
 
 | ID | Gap | Affected | Mitigation now | Remedy | Owner |
@@ -492,12 +524,12 @@ Rakvor management.
 | G7 | No peer-reviewed publication or external review of the tool | CO-P16, US-5, CO-P15 | Offer source review to opposing experts | White paper; external review under NDA | Firm |
 | G8 | Examiner status: not on French lists, oath per appointment; Colombian *certificado de idoneidad* and CGP art. 226 disclosures | FR-P5, FR-P7, FR-P8, CO-P11, CO-P12, CO-C3 | Examiner prepares these documents | Add CGP art. 226 #1–10 and CPP art. 166 fields (incl. assistants) to the templates | Examiner + Eng. |
 | G9 | F7 are "style" forms, not the official Fiscalía *Registro*; French scellés are created by OPJ/judge/clerk. Missing fields: position (cargo), ID type, witnesses present, official EMP/EF code, seal opening/re-sealing | CO-F2, CO-F3, CO-P3, FR-P1, FR-P2, FR-P9 | Label F7 as an internal custody record; use the official forms alongside | Add the missing fields; map to the official forms | Eng. + Counsel |
-| G10 | F1 is software read-only, not a hardware write-blocker (Raúl Reyes / INTERPOL precedent) | CO-J7, ISO-7 | Work only on images or write-blocked devices; record blocker model, serial and test in the case notes | Record write-blocker details in F3 / the case log | Examiner + Eng. |
+| G10 | F1 is software read-only, not a hardware write-blocker. A live collection cannot use a write-blocker at all: the running OS writes to its own disk, and the tool's execution leaves traces (G23) | CO-J7, ISO-7 | Collect live only when the mandate requires it (volatile data, encryption, no shutdown allowed); otherwise image with a write-blocker and use `--source <image>`; record the decision | Record the reason for a live collection in F3 (e.g. a `--reason` option) | Examiner + Eng. |
 | G11 | Hash policy allows md5/sha1-only pairs. SWGDE 12-f-002 accepts MD5/SHA-1 for integrity verification but recommends SHA-2/SHA-3 and requires them to identify files without inspection; BLAKE3 is not NIST-approved and less familiar to courts | ISO-6, US-13 | Always select `sha256` (or `sha512`) as one of the two (checklist) | Require SHA-256/512 as one of the two; MD5/SHA-1 only as legacy second hash | Eng. |
-| G12 | Audit log uses the host clock; only the chain head is stamped | CO-J7, CO-L4 | Check the workstation's time sync before the run; note it | Record clock source and NTP offset in F4 at start and end; optional stamp at intake | Eng. |
+| G12 | Audit log uses the host clock; only the chain head is stamped | CO-J7, CO-L4 | Note the machine's clock against a reference clock (`volatile/system.json` records its local and UTC time and time zone at the start) | Record clock source and NTP offset in F4 at start and end; optional stamp at intake | Eng. |
 | G13 | Personal data: no retention/deletion tooling, no encryption at rest or access control of outputs | CO-D4, EU-D4, EU-D6 | Encrypted case volume | Firm policies; retention and secure-deletion logs | Firm |
 | G14 | Moving legal references: CPP renumbering on 1 Jan. 2029 (ordonnance 2025-1091); Ley 527 art. 10 cites the repealed CPC | FR-P14, CO-L1 | Cite with the version date | Concordance table on this page | Counsel |
-| G15 | Scope: no imaging, live, cloud or mobile acquisition | ISO-11 | Declared; use dedicated acquisition tools | — | Examiner |
+| G15 | Scope: selected Windows artifacts only; no disk image, no memory image, no cloud or mobile acquisition, no alternate data streams | ISO-11 | Declared (limitations `NO_MEMORY_IMAGE`, `RAW_READ_COMMITTED_STATE`); use dedicated imaging and memory tools first when needed | — | Examiner |
 | G16 | No ANSSI PRIS qualification (market positioning, not admissibility) | §5.5 | — | Optional roadmap item | Firm |
 | G17 | Source access offered without a defined protocol; the Rakvor Source-Auditable Licence is a draft pending legal review | CO-P17, FR-P11, CO-C5 | Provide the exact tagged source on request | Standard NDA and inspection protocol (escrow or supervised review); finalise the licence | Firm + Counsel |
 | G18 | `verify-log` / `verify-case` check the token's imprint, status, file digest and TSA CMS signature; the TSA certificate chain only with `verify-log --tsa-ca`; **not** revocation, policy or accuracy | EU-4, CO-L9 | `verify-log --tsa-ca <TSA roots>`; revocation from CRL/OCSP evidence covering genTime (`openssl verify -crl_check` with that CRL, or rv-certcheck `--crl`/`--ocsp`; `openssl ts -verify` alone does not check it) (checklist step 9) | Offline CRL/OCSP checking of the TSA certificate | Eng. |
@@ -509,13 +541,16 @@ Rakvor management.
 | G25 | Cross-profile reproducibility of item numbering — **closed**: both profiles sort items by the normalised path, bytewise (UTF-8); the cross-profile test compares the numbering, and CI verifies a case folder written by the Python profile ([tests/golden/](../tests/golden/regenerate.py)) without the other repository; kept for numbering | — | — | — | — |
 
 <!-- forge:domain -->
-Gaps specific to this tool's domain (inventory and type detection):
+Gaps specific to this tool's domain (live collection and the raw NTFS reader):
 
 | ID | Gap | Affected | Mitigation now | Remedy | Owner |
 | --- | --- | --- | --- | --- | --- |
-| G5 | Unknown error rates and coverage of type detection (15 signatures; 2-byte `MZ` and GZIP magics; containers typed by their outer format) | CO-P15, CO-P16, CO-J8, ISO-17, US-6 | Present type findings as observations; confirm executables with a PE/ELF parser and mismatches with a format-aware tool | Labelled corpus; publish FP/FN rates per signature and release; extend the table | Eng. |
-| G23 | Files without an extension, or with an extension unknown to the table, are never compared (a program named `invoice` gives no finding) | CO-P15, ISO-4 | Review the `detected_type` column of the statistics report for executables regardless of findings | Flag executables whatever the extension | Eng. |
-| G26 | Sample scripts checking the tool's output — **closed**: `run.sh` and `run.ps1` compare the tool's `hashes.csv` (size, SHA-256, MD5) with `expected_hashes.csv` and fail on any difference; kept for numbering | — | — | — | — |
+| G5 | The raw NTFS reader is tested on synthetic volumes (a generated Windows-like volume and the `ntfs` crate's test volume) and by the manual release checks; there is no measured coverage on a corpus of real Windows 10/11 volumes (fragmented `$MFT`, attribute lists, very large files) | CO-P15, CO-P16, CO-J8, ISO-17, US-6 | Compare a sample of packaged files with an image of the same disk; read `CHANGED_DURING_COPY` and `PARTIAL_READ` findings | Test corpus of real volumes with expected digests per release | Eng. |
+| G23 | The tool's footprint on the machine (prefetch, Amcache/ShimCache, USB device records, logon events, access times through the file API) is documented but not measured per Windows build | ISO-7, CO-J7, section 8 | Note the start time (`run_started.ts_utc`); limitation `EXECUTION_LEAVES_TRACES` | Measured footprint per Windows build, published with each release | Eng. |
+| G26 | Sample scripts checking the tool's output — **closed**: `run.sh` and `run.ps1` compare `package/manifest.csv` (size, SHA-256, MD5) with `expected_hashes.csv` and fail on any difference; kept for numbering | — | — | — | — |
+| G27 | No memory image; volatile lists come from Windows APIs that kernel-level malware can falsify | ISO-11, LR-3 | Capture RAM with a dedicated tool before RV Triage when it matters; limitation `NO_MEMORY_IMAGE` | — (out of scope for v0.1) | Examiner |
+| G28 | NTFS-compressed, EFS-encrypted and reparse-point data are refused by the raw reader; alternate data streams are not collected. On a live elevated run the file API is used for such a file (method `api`), on an image it is not collected | ISO-4, LR-4 | Listed per file (`NOT_COLLECTED_ERROR` with the reason, or method `api` in the manifest) | LZNT1 decompression; ADS collection | Eng. |
+| G29 | The package is verifiable against the collection's audit log only with the original `logs/` + `reports/` layout; the rv-hashinv intake is not cryptographically linked to the collection log | CO-P2, ISO-1 | Copy the whole output folder; run `verify-log` before intake; compare rv-hashinv's digests with `manifest.csv` | Record the collection's audit head in the intake run (rv-hashinv) | Eng. |
 <!-- /forge:domain -->
 
 ## Examiner checklist before filing a report
@@ -564,12 +599,21 @@ Gaps specific to this tool's domain (inventory and type detection):
     G14).
 
 <!-- forge:domain -->
-Domain steps for this tool:
+Domain steps for this tool (step 4 above reads, for a live collection: the decision to collect live is documented,
+G10):
 
-18. **Every `UNREADABLE` item** was re-acquired or explained; unreadable items are not registered in the case.
-19. **Every `EXECUTABLE_CONTENT`** was confirmed with a PE/ELF parser and handled as potentially hostile; every
-    `EXTENSION_MISMATCH` relied on was confirmed by opening the file with a suitable tool.
-20. **Duplicates** relied on were computed with SHA-256 (or stronger) as the primary algorithm.
+18. **Before the collection**: RAM was captured first if it matters (G27); the time on the machine was compared with
+    a reference clock and noted; the run's start time is in the notes so the tool's own traces can be identified
+    (G23).
+19. **Elevation**: the summary says `live (elevated: raw NTFS read)`; if not, every `NOT_COLLECTED_NO_ADMIN` is
+    explained.
+20. **Output**: the package was written off the system volume; any `OUTPUT_ON_SYSTEM_VOLUME` is justified in the
+    report.
+21. **Every `PARTIAL_READ`, `COPY_REREAD_MISMATCH`, `NOT_COLLECTED_LOCKED` or `NOT_COLLECTED_ERROR`** relied on or
+    relevant was explained; `CHANGED_DURING_COPY` on files relied on was considered (the package holds the bytes read
+    at that moment).
+22. **Hand-off**: `verify-log` on the whole output folder printed `outputs: N verified of N recorded` before the
+    rv-hashinv intake, and rv-hashinv's digests equal `manifest.csv` (G29).
 <!-- /forge:domain -->
 
 ## Sources

@@ -1,186 +1,81 @@
-# Case folder
+# From package to case folder
 
-Every Rakvor tool can work alone (`--out DIR`). In a real engagement the tools share **one case folder**
-(`--case-dir`): rv-triage, the **intake** tool, registers each evidence file once and gives it an evidence id
-(`E0001`, `E0002`, …); every later **analysis** tool re-hashes each file, compares it with that registry and links
-its own audit chain to the case. A reviewer can then follow one item from intake to the last report, across tools,
-and check that nothing changed in between.
+Rakvor tools share **one case folder** per engagement (`--case-dir`): the intake tool registers each evidence file
+once with an evidence id (`E0001`, `E0002`, …) and later analysis tools verify against that registry.
+
+**RV Triage takes no case folder in v0.1.** It runs on the machine being collected, where the case folder must not
+be (and usually is not) available; it writes a self-contained, audit-logged **package** instead. The package is
+registered in the lab by **rv-hashinv**, the intake tool. `describe --json` reports the role `collection` for this
+reason.
 
 ```mermaid
 flowchart LR
-    E[(Evidence<br/>read-only)] --> H["rv-triage (intake)<br/>--case-dir CASE"]
-    H --> R[["evidence/registry.json<br/>E0001…: path, size, hashes"]]
-    H --> CL[["case-log.jsonl<br/>hash-chained"]]
-    R --> P["analysis tool<br/>--case-dir CASE"]
-    P -->|re-hash + compare| R
-    P --> CL
-    H --> RH["runs/rv-triage/RUN-ID/"]
-    P --> RP["runs/&lt;tool&gt;/RUN-ID/"]
+    M["Live machine"] --> T["rv-triage collect<br/>--out E:\triage"]
+    T --> P[("reports/RUN-ID/package<br/>+ logs/RUN-ID")]
+    P -->|seal, transport, custody form| V["Lab: rv-triage verify-log<br/>chain + every packaged file"]
+    V -->|OK| H["rv-hashinv scan -i package -r<br/>--case-dir CASE"]
+    H --> R[["CASE/evidence/registry.json<br/>E0001…"]]
+    H --> CL[["CASE/case-log.jsonl"]]
+    R --> A["analysis tools<br/>--case-dir CASE"]
+    V -->|BROKEN| X["Stop: document, re-collect if possible"]
 ```
 
-The contract (schemas, events, rules) is the same in the Rust and Python profiles, and a case written by one is
-read and extended by the other (tested in CI when both are present).
+## 1. Verify the package before intake
 
-## Layout (`rakvor.case/1`)
+The collection's own audit log vouches for the package: every packaged file and both manifests are recorded with
+their digests (`output_written`), and `verify-log` re-hashes them.
 
-```text
-<CASE>/
-  case.json                   {"schema":"rakvor.case/1","case_id","jurisdiction","created_utc",
-                               "created_by":{"tool","version","run_id","actor"}}       (written once)
-  case-log.jsonl              hash-chained case log (same algorithm as audit.jsonl), append-only
-  case-log.lock               exists only while a tool appends (created exclusively, then removed)
-  evidence/registry.json      {"schema":"rakvor.registry/1","items":[{"evidence_id","path","size","hashes",
-                               "registered_by":{"tool","version","run_id","audit_seq"},"registered_utc"}]}
-  evidence/registry.csv       evidence_id,path,size,<algorithms>,run_id
-  runs/<tool>/<RUN-ID>/logs/     audit.jsonl, audit.log, hashes.csv, environment.json, timestamp-*.tsr|.json
-  runs/<tool>/<RUN-ID>/reports/  statistics.*, items/<NNNNN>-<NAME>/{technical,summary,custody}.*
+```powershell
+# the whole output folder was copied: F:\incoming\triage\{logs,reports}\<RUN-ID>
+rv-triage verify-log F:\incoming\triage\logs\<RUN-ID>
+# OK  152 entries, chain intact: …\audit.jsonl
+#     truncation not detectable without a timestamp or case record
+#     outputs: 294 verified of 294 recorded (md5, sha256)
 ```
 
-JSON schemas: [case.schema.json](../schemas/case.schema.json) and [registry.schema.json](../schemas/registry.schema.json).
-
-## Using it
-
-```bash
-# 1. Open the case and register the evidence (creates case.json; --case and --jurisdiction are needed only now)
-rv-triage scan -i D:\evidence -r --case-dir E:\CASE-014 --case CASE-014 --jurisdiction fr
-# 2. Re-examine some registered items later (or run an analysis tool with the same --case-dir)
-rv-triage scan --case-dir E:\CASE-014 --evidence E0001,E0002
-# 3. Check the whole case before handing it over
-rv-triage verify-case E:\CASE-014
-```
-
-In the GUI, fill **Case folder** in section 1. The output folder is then derived (`<case>/runs/rv-triage/<RUN-ID>`)
-and locked, the change is audited (`ui_case_dir_changed`), and the result panel lists the evidence id of every
-item.
-
-| Option | Meaning |
+| `verify-log` checks | Detects |
 | --- | --- |
-| `--case-dir DIR` | Work in this case folder (created when it has no `case.json`). `--out` is not used. |
-| `--case ID` | Names the case at creation; afterwards it must match `case.json` (or be left out). |
-| `--jurisdiction co\|fr` | Set at creation; later runs use the case's jurisdiction for custody forms. |
-| `--evidence E0001,E0007` | Examine these registered items (no `--input` needed). |
-| no `--input` | Every registered item is examined. |
+| The hash chain of `audit.jsonl` | an edited, deleted or re-ordered entry |
+| Each RFC 3161 token (`timestamp_obtained`) | a log shorter than its timestamp, a token that does not match the head, an invalid TSA signature (`--tsa-ca` for the chain) |
+| Every recorded output: `package/artifacts/…`, `package/volatile/*.json`, `package/manifest.csv`, `package/manifest.json`, the reports, `hashes.csv`, `environment.json` | a packaged file edited, deleted or replaced since the collection (exit 3, the file and both digests named) |
 
-## Roles
+Requirements and limits:
 
-The role is one constant: `CASE_ROLE` (`src/core/src/lib.rs`) and `"case_role"` in `.forge.json`. The reference
-rv-triage is `intake`; a tool scaffolded from it is `analysis`. Both behaviours live in the shared code and are
-tested in both profiles.
+- Keep `logs/<RUN-ID>` and `reports/<RUN-ID>` as siblings under one folder: the re-hash resolves `package/…` inside
+  `reports/<RUN-ID>`. A package copied on its own cannot be checked against the log.
+- A file **added** to the package after the collection is not in the log and is not reported by `verify-log`;
+  compare the package with `manifest.csv` (one row per packaged file) before intake.
+- Without a timestamp, the end of the log is not anchored (`truncation not detectable …`): compare the audit head
+  with the one written in the collection notes, and stamp the log with `rv-triage timestamp`.
+- Independent check: `python tests/verify_chain.py <log folder>` (Python re-implementation).
 
-| | Intake (rv-triage) | Analysis (later tools) |
-| --- | --- | --- |
-| Registry | Registers every successfully hashed item | Never writes it |
-| Same path, same content | Keeps the existing id (`already_registered`) | `evidence_verified_against_case` (match) |
-| Same path, other content | New id + finding `REGISTRY_PATH_CONTENT_CHANGED` (medium) | Finding `EVIDENCE_HASH_MISMATCH_WITH_CASE` (**high**); the analysis still runs |
-| Not in the registry | Registered (new id) | Finding `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium) |
-| Matching order | — | `--evidence` id, else same path, else same content |
+## 2. Register the package with rv-hashinv
 
-**Hash algorithms.** A case run always includes at least one algorithm present in every registered item. If the
-user picked a disjoint set, SHA-256 (or the registry's algorithm) is added — or replaces the second choice, since
-the two-algorithm limit still holds — and the change is audited as `case_algorithm_added`.
-
-### Called by an analysis tool
-
-An analysis tool can run the intake for the examiner: `rv-pdfauth analyze … --case-dir CASE --intake hashinv`
-starts this executable as `rv-triage scan … --case-dir CASE --progress jsonl` with the same evidence and settings,
-then analyses. Nothing changes on this side: the hash inventory, reports, registry and audit log are rv-triage's own,
-and its run is an ordinary entry in the case log. The calling tool records this executable's path, version and
-SHA-256 in its own audit log. The interface it relies on — `--version` printing `rv-triage X.Y.Z`, the
-`scan` options, the JSON Lines events (`run_started`, `progress`, `run_finished`) and exit codes 0/3 meaning
-"finished" — is therefore a compatibility promise: change it only with a major version.
-
-```mermaid
-flowchart LR
-    P["rv-pdfauth<br/>--intake hashinv"] -->|"scan --case-dir … --progress jsonl"| H["rv-triage"]
-    H -->|"registry + hash reports"| C[("Case folder")]
-    H -->|"progress, run id, exit code"| P
-    P -->|"analysis, verified against the registry"| C
+```powershell
+# first intake into a new case (creates case.json; --case and --jurisdiction only now)
+rv-hashinv scan -i F:\incoming\triage\reports\<RUN-ID>\package -r --case-dir F:\CASE-014 --case CASE-014
+# later packages into the same case
+rv-hashinv scan -i F:\incoming\triage2\reports\<RUN-ID>\package -r --case-dir F:\CASE-014
 ```
 
-## Events
+rv-hashinv hashes every file of the package again, gives each one an evidence id in
+`<CASE>/evidence/registry.json` and writes its own run under `<CASE>/runs/rv-hashinv/<RUN-ID>/`. Compare its
+digests with the collection's `manifest.csv` (same algorithm): they must be equal. The case-folder layout,
+events and `verify-case` are documented in rv-hashinv's `docs/case-folder.md`.
 
-```mermaid
-sequenceDiagram
-    participant T as Tool run
-    participant L as case-log.lock
-    participant C as case-log.jsonl
-    participant R as registry.json
-    participant A as runs/tool/RUN/logs/audit.jsonl
-    T->>L: create (exclusive)
-    T->>C: verify chain + registry digest
-    T->>C: run_started {run_dir, role}
-    T->>L: remove
-    T->>A: run_started, case_linked {case_log_head_at_start}
-    T->>A: item_hashed … evidence_verified_against_case / evidence_registered
-    opt intake
-        T->>L: create
-        T->>R: add new ids, write registry.json + .csv
-        T->>C: evidence_registered {evidence_ids, added, registry_sha256}
-        T->>L: remove
-    end
-    T->>A: … run_finished (final audit head)
-    T->>L: create
-    T->>C: run_finished {audit_head, audit_entries, status, totals, verification}
-    T->>L: remove
-```
+Keep the collection's `logs/<RUN-ID>` and `reports/<RUN-ID>` (statistics, item reports, custody forms) with the
+case file: they show how the package was made, which rv-hashinv cannot.
 
-| Case-log event | Written by | Details |
-| --- | --- | --- |
-| `case_created` | first tool | case_id, jurisdiction, schema, `case_json_sha256`, `registry_sha256: null` |
-| `run_started` | every tool | tool, version, `run_dir` (relative), frontend, role, evidence_ids |
-| `evidence_registered` | intake tool | evidence_ids (all of this run), added (new ones), registry_items, `registry_sha256` |
-| `run_finished` | every tool, also after a cancel or a failure | status `completed`/`cancelled`/`failed`, `audit_head`, `audit_entries`, timestamp_status, totals, verification {registered, added, verified, mismatched, unregistered} |
+## 3. `verify-case` in this tool
 
-Run audit (`audit.jsonl`) events added by the case folder: `case_linked` (entry #2, right after `run_started`),
-`case_algorithm_added`, `evidence_registered`, `evidence_verified_against_case`, `evidence_not_in_case_registry`.
-
-**The two chains vouch for each other.** `case_linked.case_log_head_at_start` is the hash of the run's
-`run_started` entry in the case log; `run_finished.audit_head` in the case log is the hash of the run's final audit
-entry. Editing either side breaks a link.
+`rv-triage verify-case <CASE>` is the shared verifier of every Rakvor tool and works on any case folder (case log,
+registry, every run's audit log and outputs, `--rehash`). RV Triage's own runs never appear in a case folder in v0.1.
 
 ## Safety rules
 
-- **A broken case is never extended.** Before every append a tool re-verifies the case-log chain, `case.json`
-  (digest at creation) and the registry digest; on failure it stops with exit code 3 and writes nothing.
-- **One writer at a time.** Appends happen under `case-log.lock` (created exclusively). A tool waits up to 30 s for
-  another one; a lock older than 10 minutes is reported as *stale* with its owner, and is **never deleted
-  automatically** — a person decides.
-- **Only the intake tool writes the registry**, and every change records its new SHA-256 in the case log.
-- **Reports name the evidence id** of each item; the custody form uses the case id, the evidence id and the intake
-  date from the registry.
-
-## How a reviewer verifies a case
-
-```mermaid
-flowchart TB
-    A["verify-case CASE"] --> B{"case-log.jsonl<br/>chain intact?"}
-    B -- no --> X["BROKEN (exit 3)"]
-    B -- yes --> C{"case.json and registry.json<br/>match recorded digests?"}
-    C -- no --> X
-    C -- yes --> D["for every run_started"]
-    D --> E{"run audit.jsonl intact,<br/>timestamps valid?"}
-    E -- no --> X
-    E -- yes --> F{"case_linked → run_started<br/>and run_finished → final audit entry?"}
-    F -- no --> X
-    F -- yes --> R{"every output the run's<br/>audit.jsonl records unchanged?"}
-    R -- no --> X
-    R -- yes --> G{"--rehash: reachable evidence<br/>matches the registry?"}
-    G -- no --> X
-    G -- "yes / not asked" --> OK["OK (exit 0)<br/>warnings: runs without run_finished,<br/>items not reachable"]
-```
-
-1. `rv-triage verify-case <CASE>` (any Rakvor tool has it; they agree). Exit 0 = intact, 3 = broken, 1 = not a
-   case folder. Only `timestamp_obtained` may follow a run's recorded final entry (a delayed timestamp). Every
-   output file a run's audit log records (reports, `hashes.csv`, `environment.json`) is re-hashed: an edited,
-   deleted or replaced output is exit 3, named as `run <RUN-ID>: output reports/…`.
-   `--rehash` also re-hashes every registered item still reachable at its registered path (the latest registration
-   of a path) and compares it with the registry: a difference is exit 3, an unreachable item a warning.
-   `rv-triage verify-log <CASE>/runs/<tool>/<RUN-ID>/logs` checks one run and anchors its end to `run_finished` in
-   the case log.
-2. Independently of any Rakvor binary: `python tests/verify_chain.py <CASE>/runs/<tool>/<RUN-ID>/logs` re-checks a
-   run (chain, hash register and every output its audit log records); the case log uses the same chain rule, and
-   `sha256sum evidence/registry.json` must equal the last
-   `registry_sha256` in `case-log.jsonl`.
-3. Re-hash the evidence with any tool and compare it with `evidence/registry.csv` (or `verify-case --rehash`).
-4. `python tests/validate_reports.py <CASE>` validates `case.json`, `registry.json` and every JSON report against
-   `schemas/`.
+| Rule | Why |
+| --- | --- |
+| Never write the package into the case folder from the live machine | the case folder belongs to the lab; the machine is untrusted |
+| Verify before intake | rv-hashinv's registry fixes the digests from intake on; a package damaged in transport would be registered as is |
+| Register the package folder, not single files | the manifest and `system.json` give context to every artifact |
+| One collection, one package, one intake run | the item numbers, audit ranges and custody forms stay one-to-one |
