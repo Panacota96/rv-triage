@@ -139,13 +139,71 @@
       "title": "La ruta registrada contiene ahora otro contenido",
       "shows": "Esta ruta se registró antes como %{previous_id} con otro contenido; el contenido actual recibe un nuevo ID de evidencia.",
       "does_not_prove": "Cuál versión es la original ni por qué cambió el contenido."
+    },
+    "COLLECTED_RAW": {
+      "title": "Copiado por lectura NTFS directa",
+      "shows": "El archivo %{source} se copió al paquete como %{package} leyendo el volumen NTFS directamente, de modo que se pudieron leer archivos que Windows mantiene bloqueados.",
+      "does_not_prove": "No demuestra que el archivo esté completo en disco: los datos aún en la caché de Windows y no escritos no se incluyen."
+    },
+    "COLLECTED_API": {
+      "title": "Copiado con la interfaz de archivos normal",
+      "shows": "El archivo %{source} se copió al paquete como %{package} mediante la interfaz de archivos normal de Windows.",
+      "does_not_prove": "No demuestra que la copia incluya datos que otros programas aún no habían escrito, ni los metadatos NTFS del archivo (fechas de $FILE_NAME)."
+    },
+    "NOT_COLLECTED_NO_ADMIN": {
+      "title": "No recolectado: sin derechos de administrador",
+      "shows": "%{source} no se recolectó porque la herramienta no se ejecutó como administrador: %{error}.",
+      "does_not_prove": "No demuestra que el artefacto falte o se haya ocultado; ejecute de nuevo con elevación para recolectarlo."
+    },
+    "NOT_COLLECTED_LOCKED": {
+      "title": "No recolectado: archivo bloqueado",
+      "shows": "%{source} no se recolectó porque estaba bloqueado y no se pudo leer directamente: %{error}.",
+      "does_not_prove": "No demuestra que el archivo falte ni que se proteja a propósito; Windows bloquea estos archivos en uso normal."
+    },
+    "NOT_COLLECTED_ERROR": {
+      "title": "No recolectado: error de lectura",
+      "shows": "%{source} no se recolectó: %{error}.",
+      "does_not_prove": "No demuestra que el artefacto haya sido manipulado; permisos, una unidad de salida llena o un disco dañado pueden causarlo."
+    },
+    "CHANGED_DURING_COPY": {
+      "title": "Cambió mientras se copiaba",
+      "shows": "La fuente cambió durante la copia (%{fields}): tamaño antes %{size_before} bytes, %{bytes_read} bytes leídos. El paquete conserva los bytes leídos en ese momento.",
+      "does_not_prove": "No demuestra manipulación: los registros de eventos y el historial del navegador se escriben continuamente en un sistema en ejecución."
+    },
+    "PARTIAL_READ": {
+      "title": "Copiado solo en parte",
+      "shows": "La lectura se detuvo con un error en el byte %{offset} de %{size}: %{error}. El paquete conserva los bytes leídos antes del error.",
+      "does_not_prove": "No demuestra que el resto del archivo se haya borrado; un sector dañado o un archivo en uso pueden causarlo."
+    },
+    "COPY_REREAD_MISMATCH": {
+      "title": "La copia empaquetada difiere de lo leído",
+      "shows": "La copia empaquetada, leída de nuevo, tiene %{algorithm} %{reread}, pero los bytes leídos de la fuente tenían %{copied}.",
+      "does_not_prove": "No demuestra cuál lado es incorrecto; la unidad de salida puede estar defectuosa. Recolecte de nuevo en otra unidad."
+    },
+    "VOLATILE_PARTIAL": {
+      "title": "Datos volátiles incompletos",
+      "shows": "%{incomplete} de %{of} entradas de %{what} están incompletas: %{reason}.",
+      "does_not_prove": "No demuestra que esas entradas se hayan ocultado a propósito; los procesos protegidos niegan el acceso incluso a administradores."
+    },
+    "OUTPUT_ON_SYSTEM_VOLUME": {
+      "title": "Paquete escrito en el volumen del sistema",
+      "shows": "El paquete se escribió en %{out}, en el volumen del sistema %{volume} de la máquina recolectada, por decisión explícita.",
+      "does_not_prove": "No demuestra que se haya sobrescrito evidencia, pero escribir allí puede sobrescribir datos borrados; registre por qué fue necesario."
+    },
+    "NOT_AVAILABLE_FROM_SOURCE": {
+      "title": "No disponible desde esta fuente",
+      "shows": "Los datos volátiles solo existen en un sistema en ejecución; esta ejecución leyó una fuente de tipo %{source}.",
+      "does_not_prove": "No dice nada del sistema del que provienen la imagen o la carpeta."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La detección de tipo usa una tabla limitada de firmas comunes; los tipos desconocidos se reportan como desconocidos, no como sospechosos.",
     "TIMESTAMPS_FROM_FILESYSTEM": "Las fechas de modificación provienen del sistema de archivos de la copia examinada y pueden diferir de la fuente original.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un resultado sin hallazgos no prueba que un archivo sea auténtico ni que no haya sido alterado antes de su adquisición.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un sello de tiempo confiable prueba que el log de auditoría existía en esta forma exacta en la hora indicada; no prueba que la copia examinada coincida con la fuente original."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un sello de tiempo confiable prueba que el log de auditoría existía en esta forma exacta en la hora indicada; no prueba que la copia examinada coincida con la fuente original.",
+    "EXECUTION_LEAVES_TRACES": "Ejecutar cualquier programa en la máquina deja rastros propios (prefetch, Amcache, las entradas del dispositivo USB en el registro): son esperados y no deben leerse como actividad sospechosa.",
+    "RAW_READ_COMMITTED_STATE": "Una lectura NTFS directa ve lo escrito en disco en ese momento; los datos aún en la caché de Windows, y los archivos que cambian durante la copia, pueden diferir de lo que muestre una imagen posterior.",
+    "NO_MEMORY_IMAGE": "Esta versión no adquiere la memoria RAM: las listas volátiles son lo que Windows informó, y un malware con acceso al núcleo puede ocultarse de ellas."
   },
   "brand": {
     "descriptor": "FORENSE | RESPUESTA A INCIDENTES | SEGURIDAD",

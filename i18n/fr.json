@@ -139,13 +139,71 @@
       "title": "Le chemin enregistré contient désormais un autre contenu",
       "shows": "Ce chemin a déjà été enregistré comme %{previous_id} avec un autre contenu ; le contenu actuel reçoit un nouvel ID d'élément.",
       "does_not_prove": "Quelle version est l'originale ni pourquoi le contenu a changé."
+    },
+    "COLLECTED_RAW": {
+      "title": "Copié par lecture NTFS directe",
+      "shows": "Le fichier %{source} a été copié dans le paquet sous %{package} en lisant directement le volume NTFS, ce qui permet de lire les fichiers que Windows garde verrouillés.",
+      "does_not_prove": "Cela ne prouve pas que le fichier est complet sur le disque : les données encore dans le cache de Windows et non écrites ne sont pas incluses."
+    },
+    "COLLECTED_API": {
+      "title": "Copié avec l'interface de fichiers normale",
+      "shows": "Le fichier %{source} a été copié dans le paquet sous %{package} via l'interface de fichiers normale de Windows.",
+      "does_not_prove": "Cela ne prouve pas que la copie inclut des données que d'autres programmes n'avaient pas encore écrites, ni les métadonnées NTFS du fichier (dates $FILE_NAME)."
+    },
+    "NOT_COLLECTED_NO_ADMIN": {
+      "title": "Non collecté : pas de droits administrateur",
+      "shows": "%{source} n'a pas été collecté car l'outil ne s'exécutait pas en administrateur : %{error}.",
+      "does_not_prove": "Cela ne prouve pas que l'artefact manque ou a été caché ; relancez avec élévation pour le collecter."
+    },
+    "NOT_COLLECTED_LOCKED": {
+      "title": "Non collecté : fichier verrouillé",
+      "shows": "%{source} n'a pas été collecté car il était verrouillé et n'a pas pu être lu directement : %{error}.",
+      "does_not_prove": "Cela ne prouve pas que le fichier manque ni qu'il est protégé volontairement ; Windows verrouille ces fichiers en usage normal."
+    },
+    "NOT_COLLECTED_ERROR": {
+      "title": "Non collecté : erreur de lecture",
+      "shows": "%{source} n'a pas été collecté : %{error}.",
+      "does_not_prove": "Cela ne prouve pas que l'artefact a été altéré ; des droits d'accès, un support de sortie plein ou un disque endommagé peuvent en être la cause."
+    },
+    "CHANGED_DURING_COPY": {
+      "title": "Modifié pendant la copie",
+      "shows": "La source a changé pendant la copie (%{fields}) : taille avant %{size_before} octets, %{bytes_read} octets lus. Le paquet conserve les octets lus à ce moment.",
+      "does_not_prove": "Cela ne prouve pas une altération : les journaux d'événements et l'historique du navigateur sont écrits en continu sur un système en marche."
+    },
+    "PARTIAL_READ": {
+      "title": "Copié en partie seulement",
+      "shows": "La lecture s'est arrêtée sur une erreur à l'octet %{offset} sur %{size} : %{error}. Le paquet conserve les octets lus avant l'erreur.",
+      "does_not_prove": "Cela ne prouve pas que le reste du fichier a été supprimé ; un secteur défectueux ou un fichier en cours d'utilisation peuvent en être la cause."
+    },
+    "COPY_REREAD_MISMATCH": {
+      "title": "La copie du paquet diffère de ce qui a été lu",
+      "shows": "La copie du paquet, relue, a pour %{algorithm} %{reread}, mais les octets lus à la source avaient %{copied}.",
+      "does_not_prove": "Cela ne dit pas quel côté est erroné ; le support de sortie peut être défaillant. Collectez à nouveau sur un autre support."
+    },
+    "VOLATILE_PARTIAL": {
+      "title": "Données volatiles incomplètes",
+      "shows": "%{incomplete} entrées %{what} sur %{of} sont incomplètes : %{reason}.",
+      "does_not_prove": "Cela ne prouve pas que ces entrées ont été cachées volontairement ; les processus protégés refusent l'accès même aux administrateurs."
+    },
+    "OUTPUT_ON_SYSTEM_VOLUME": {
+      "title": "Paquet écrit sur le volume système",
+      "shows": "Le paquet a été écrit dans %{out}, sur le volume système %{volume} de la machine collectée, par choix explicite.",
+      "does_not_prove": "Cela ne prouve pas qu'une preuve a été écrasée, mais écrire à cet endroit peut écraser des données supprimées ; consignez pourquoi c'était nécessaire."
+    },
+    "NOT_AVAILABLE_FROM_SOURCE": {
+      "title": "Non disponible depuis cette source",
+      "shows": "Les données volatiles n'existent que sur un système en marche ; cette exécution a lu une source de type %{source}.",
+      "does_not_prove": "Cela ne dit rien du système dont proviennent l'image ou le dossier."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La détection du type repose sur une table limitée de signatures courantes ; les types inconnus sont signalés comme inconnus, non comme suspects.",
     "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification proviennent du système de fichiers de la copie examinée et peuvent différer de la source d'origine.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un résultat sans constatation ne prouve pas qu'un fichier est authentique ni qu'il n'a pas été modifié avant son acquisition.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine.",
+    "EXECUTION_LEAVES_TRACES": "Exécuter un programme sur la machine laisse ses propres traces (prefetch, Amcache, les entrées du périphérique USB dans le registre) : elles sont attendues et ne doivent pas être lues comme une activité suspecte.",
+    "RAW_READ_COMMITTED_STATE": "Une lecture NTFS directe voit ce qui est écrit sur le disque à cet instant ; les données encore dans le cache de Windows, et les fichiers modifiés pendant la copie, peuvent différer de ce que montrera une image ultérieure.",
+    "NO_MEMORY_IMAGE": "Cette version n'acquiert pas la mémoire vive : les listes volatiles sont ce que Windows a déclaré, et un logiciel malveillant avec accès au noyau peut s'y cacher."
   },
   "brand": {
     "descriptor": "INVESTIGATION NUMÉRIQUE | RÉPONSE AUX INCIDENTS | SÉCURITÉ",

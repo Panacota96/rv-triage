@@ -541,6 +541,7 @@ fn scan(a: ScanArgs) -> u8 {
         case_dir: a.case_dir.clone(),
         evidence_ids,
         case_role: CASE_ROLE,
+        collect: None,
     };
 
     let bar = match a.progress {

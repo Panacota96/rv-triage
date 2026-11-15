@@ -139,13 +139,71 @@
       "title": "Registered path now holds different content",
       "shows": "This path was registered earlier as %{previous_id} with other content; the current content gets a new evidence ID.",
       "does_not_prove": "Which version is the original or why the content changed."
+    },
+    "COLLECTED_RAW": {
+      "title": "Copied by raw NTFS read",
+      "shows": "The file %{source} was copied into the package as %{package} by reading the NTFS volume directly, so files Windows keeps locked could be read.",
+      "does_not_prove": "It does not show that the file is complete on disk: data still in the Windows cache and not yet written is not included."
+    },
+    "COLLECTED_API": {
+      "title": "Copied with the normal file API",
+      "shows": "The file %{source} was copied into the package as %{package} through the normal Windows file interface.",
+      "does_not_prove": "It does not show that the copy includes data other programs had not yet written, nor the file's NTFS metadata ($FILE_NAME times)."
+    },
+    "NOT_COLLECTED_NO_ADMIN": {
+      "title": "Not collected: no administrator rights",
+      "shows": "%{source} was not collected because the tool did not run as administrator: %{error}.",
+      "does_not_prove": "It does not show that the artifact is missing or was hidden; run again elevated to collect it."
+    },
+    "NOT_COLLECTED_LOCKED": {
+      "title": "Not collected: file locked",
+      "shows": "%{source} was not collected because it was locked and could not be read raw: %{error}.",
+      "does_not_prove": "It does not show that the file is missing or protected on purpose; Windows locks these files in normal use."
+    },
+    "NOT_COLLECTED_ERROR": {
+      "title": "Not collected: read error",
+      "shows": "%{source} was not collected: %{error}.",
+      "does_not_prove": "It does not show that the artifact was tampered with; permissions, a full output drive or a damaged disk can cause this."
+    },
+    "CHANGED_DURING_COPY": {
+      "title": "Changed while it was copied",
+      "shows": "The source changed during the copy (%{fields}): size before %{size_before} bytes, %{bytes_read} bytes read. The package holds the bytes read at that moment.",
+      "does_not_prove": "It does not show tampering: event logs and browser history are written to continuously on a running system."
+    },
+    "PARTIAL_READ": {
+      "title": "Copied only in part",
+      "shows": "Reading stopped with an error at byte %{offset} of %{size}: %{error}. The package keeps the bytes read before the error.",
+      "does_not_prove": "It does not show that the rest of the file was deleted; a damaged sector or a file in use can cause it."
+    },
+    "COPY_REREAD_MISMATCH": {
+      "title": "Packaged copy differs from what was read",
+      "shows": "The packaged copy, read back, has %{algorithm} %{reread}, but the bytes read from the source had %{copied}.",
+      "does_not_prove": "It does not show which side is wrong; the output drive may be faulty. Collect again to another drive."
+    },
+    "VOLATILE_PARTIAL": {
+      "title": "Volatile data incomplete",
+      "shows": "%{incomplete} of %{of} %{what} entries are incomplete: %{reason}.",
+      "does_not_prove": "It does not show that those entries were hidden on purpose; protected processes refuse access even to administrators."
+    },
+    "OUTPUT_ON_SYSTEM_VOLUME": {
+      "title": "Package written on the system volume",
+      "shows": "The package was written to %{out}, on the system volume %{volume} of the machine being collected, by explicit choice.",
+      "does_not_prove": "It does not show that evidence was overwritten, but writing there can overwrite deleted data; record why it was necessary."
+    },
+    "NOT_AVAILABLE_FROM_SOURCE": {
+      "title": "Not available from this source",
+      "shows": "Volatile data exists only on a running system; this run read a %{source} source.",
+      "does_not_prove": "It does not show anything about the system that the image or folder came from."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "Type detection uses a limited table of common file signatures; unknown types are reported as unknown, not as suspicious.",
     "TIMESTAMPS_FROM_FILESYSTEM": "Modification times come from the file system of the examined copy and may differ from the original source.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "A result without findings does not prove that a file is authentic or unaltered before acquisition.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that the examined copy matches the original source."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that the examined copy matches the original source.",
+    "EXECUTION_LEAVES_TRACES": "Running any program on the machine leaves traces of its own (prefetch, Amcache, the USB device entries in the registry): they are expected and must not be read as suspect activity.",
+    "RAW_READ_COMMITTED_STATE": "A raw NTFS read sees what is written on disk at that moment; data still in the Windows cache, and files changing during the copy, may differ from what a later image shows.",
+    "NO_MEMORY_IMAGE": "This version does not image RAM: the volatile lists are what Windows reported, which malware with kernel access can hide from."
   },
   "brand": {
     "descriptor": "FORENSICS | INCIDENT RESPONSE | SECURITY",
