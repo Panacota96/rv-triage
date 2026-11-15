@@ -3409,9 +3409,11 @@ name = "rv-triage-gui"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "png",
  "rfd",
  "rv-triage-core",
  "serde_json",
+ "windows-sys 0.61.2",
  "winresource",
 ]
 

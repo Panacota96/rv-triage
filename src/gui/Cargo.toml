@@ -24,6 +24,12 @@ serde_json.workspace = true
 # Native file/folder pickers on Windows (no GTK/portal dependency elsewhere: a text field is used instead).
 [target.'cfg(windows)'.dependencies]
 rfd.workspace = true
+# "Restart as administrator": ShellExecuteW with the runas verb.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[dev-dependencies]
+# The headless screenshot example writes PNGs.
+png = "0.18"
 
 # Icon + version details in the Windows .exe (build.rs; does nothing on other platforms).
 [build-dependencies]
