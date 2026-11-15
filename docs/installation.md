@@ -236,7 +236,7 @@ $LASTEXITCODE                                  # 0
 
 <!-- forge:domain -->
 Expected summary: **collected 23, not collected 1, errors 0, findings high 0, medium 0, low 0, info 24**, exit
-code 0: 22 artifact files plus `volatile/system.json`, all `COLLECTED_API`; volatile data is not available from a
+code 0: 22 artifact files (`COLLECTED_API`) plus `volatile/system.json` (`CAPTURED_SNAPSHOT`); volatile data is not available from a
 folder (`NOT_AVAILABLE_FROM_SOURCE`). The package paths, sizes, SHA-256 and MD5 in
 `reports\<RUN-ID>\package\manifest.csv` must equal `examples\sample\expected_hashes.csv` (computed independently
 with Python's `hashlib` by `make_expected.py`); the finding codes are in `expected_findings.json`. For example:

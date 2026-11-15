@@ -1,5 +1,5 @@
-//! Facts about the machine the tool runs on (FROZEN signatures for v0.1). The Windows implementations use the
-//! `windows` crate and are filled in by the volatile agent; other platforms return what `std` can tell.
+//! Facts about the machine the tool runs on (FROZEN signatures for v0.1). Windows uses read-only Win32
+//! queries (`windows_impl`); other platforms return what `std` can tell.
 
 use serde::Serialize;
 use std::path::Path;

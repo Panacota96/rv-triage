@@ -194,11 +194,16 @@
       "title": "Non disponible depuis cette source",
       "shows": "Les données volatiles n'existent que sur un système en marche ; cette exécution a lu une source de type %{source}.",
       "does_not_prove": "Cela ne dit rien du système dont proviennent l'image ou le dossier."
+    },
+    "CAPTURED_SNAPSHOT": {
+      "title": "Capturé depuis le système en marche",
+      "shows": "L'outil a écrit %{file} à partir de ce que le système en marche a déclaré (ce n'est pas la copie d'un fichier du volume).",
+      "does_not_prove": "Cela ne prouve pas que le système a tout déclaré : les processus protégés et les logiciels malveillants au niveau du noyau peuvent masquer des entrées."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La détection du type repose sur une table limitée de signatures courantes ; les types inconnus sont signalés comme inconnus, non comme suspects.",
-    "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification proviennent du système de fichiers de la copie examinée et peuvent différer de la source d'origine.",
+    "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification sont celles qu'a enregistrées le système de fichiers source ($STANDARD_INFORMATION), lues au moment de la copie ; un logiciel peut les modifier et elles ne prouvent pas quand le contenu a été écrit.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un résultat sans constatation ne prouve pas qu'un fichier est authentique ni qu'il n'a pas été modifié avant son acquisition.",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine.",
     "EXECUTION_LEAVES_TRACES": "Exécuter un programme sur la machine laisse ses propres traces (prefetch, Amcache, les entrées du périphérique USB dans le registre) : elles sont attendues et ne doivent pas être lues comme une activité suspecte.",

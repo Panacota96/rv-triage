@@ -194,11 +194,16 @@
       "title": "No disponible desde esta fuente",
       "shows": "Los datos volátiles solo existen en un sistema en ejecución; esta ejecución leyó una fuente de tipo %{source}.",
       "does_not_prove": "No dice nada del sistema del que provienen la imagen o la carpeta."
+    },
+    "CAPTURED_SNAPSHOT": {
+      "title": "Capturado del sistema en ejecución",
+      "shows": "La herramienta escribió %{file} a partir de lo que informó el sistema en ejecución (no es una copia de un archivo del volumen).",
+      "does_not_prove": "No demuestra que el sistema informara todo: los procesos protegidos y el malware a nivel de núcleo pueden ocultar entradas."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La detección de tipo usa una tabla limitada de firmas comunes; los tipos desconocidos se reportan como desconocidos, no como sospechosos.",
-    "TIMESTAMPS_FROM_FILESYSTEM": "Las fechas de modificación provienen del sistema de archivos de la copia examinada y pueden diferir de la fuente original.",
+    "TIMESTAMPS_FROM_FILESYSTEM": "Las fechas de modificación son las que registró el sistema de archivos de la fuente ($STANDARD_INFORMATION), leídas en el momento de la copia; el software puede cambiarlas y no prueban cuándo se escribió el contenido.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un resultado sin hallazgos no prueba que un archivo sea auténtico ni que no haya sido alterado antes de su adquisición.",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un sello de tiempo confiable prueba que el log de auditoría existía en esta forma exacta en la hora indicada; no prueba que la copia examinada coincida con la fuente original.",
     "EXECUTION_LEAVES_TRACES": "Ejecutar cualquier programa en la máquina deja rastros propios (prefetch, Amcache, las entradas del dispositivo USB en el registro): son esperados y no deben leerse como actividad sospechosa.",

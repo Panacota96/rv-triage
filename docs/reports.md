@@ -66,7 +66,7 @@ pie showData
 | High | `PARTIAL_READ`, `COPY_REREAD_MISMATCH`, `OUTPUT_ON_SYSTEM_VOLUME`, `UNREADABLE` | `problem` | 3 |
 | Medium | `NOT_COLLECTED_LOCKED`, `NOT_COLLECTED_ERROR`, `CHANGED_DURING_COPY` | `attention` | 0 |
 | Low | `NOT_COLLECTED_NO_ADMIN`, `VOLATILE_PARTIAL` | `attention` | 0 |
-| Informational | `COLLECTED_RAW`, `COLLECTED_API`, `NOT_AVAILABLE_FROM_SOURCE` | `ok` | 0 |
+| Informational | `COLLECTED_RAW`, `COLLECTED_API`, `CAPTURED_SNAPSHOT`, `NOT_AVAILABLE_FROM_SOURCE` | `ok` | 0 |
 
 `OUTPUT_ON_SYSTEM_VOLUME` is attached to `volatile/system.json` (the run-level record), so that item is `problem`.
 
@@ -80,7 +80,8 @@ Codes are defined in `codes` in [collect/mod.rs](../src/core/src/collect/mod.rs)
 | Code | Severity | Raised when (code) | What it shows | What it does **not** prove |
 | --- | --- | --- | --- | --- |
 | `COLLECTED_RAW` | info | the file was read from the raw NTFS volume (`copy.rs`) | The file was copied into the package by reading the NTFS volume directly, so files Windows keeps locked could be read. | That the file is complete on disk: data still in the Windows cache and not yet written is not included. |
-| `COLLECTED_API` | info | the file was read with the file API; also every `volatile/*.json` snapshot (param `method: snapshot`) | The file was copied into the package through the normal Windows file interface. | That the copy includes data other programs had not yet written, nor the file's NTFS metadata (`$FILE_NAME` times). |
+| `COLLECTED_API` | info | the file was read with the file API | The file was copied into the package through the normal Windows file interface. | That the copy includes data other programs had not yet written, nor the file's NTFS metadata (`$FILE_NAME` times). |
+| `CAPTURED_SNAPSHOT` | info | every file the tool writes from the running system: `volatile/*.json` and `volatile/system.json` | The tool wrote the file from what the running system reported; it is not a copy of a file on the volume. | That the system reported everything: protected processes and kernel-level malware can hide entries. |
 | `NOT_COLLECTED_NO_ADMIN` | low | live source, not elevated, open/list failed with access denied (5), sharing violation (32) or lock violation (33) | The file was not collected because the tool did not run as administrator (with the OS error). | That the artifact is missing or was hidden; run again elevated to collect it. |
 | `NOT_COLLECTED_LOCKED` | medium | sharing or lock violation (32, 33) otherwise (elevated, after the raw read and the API fallback both failed) | The file was locked and could not be read raw (with the error). | That the file is missing or protected on purpose; Windows locks these files in normal use. |
 | `NOT_COLLECTED_ERROR` | medium | any other open, list or write error: compressed / encrypted / reparse data on an image, a path that cannot be recreated safely, a full output drive | The file was not collected (with the error). | That the artifact was tampered with; permissions, a full output drive or a damaged disk can cause this. |

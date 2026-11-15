@@ -286,6 +286,8 @@ pub mod codes {
     pub const VOLATILE_PARTIAL: &str = "VOLATILE_PARTIAL";
     pub const OUTPUT_ON_SYSTEM_VOLUME: &str = "OUTPUT_ON_SYSTEM_VOLUME";
     pub const NOT_AVAILABLE_FROM_SOURCE: &str = "NOT_AVAILABLE_FROM_SOURCE";
+    /// A file the tool generated from the running system (volatile lists, `system.json`), not a copy.
+    pub const CAPTURED_SNAPSHOT: &str = "CAPTURED_SNAPSHOT";
 }
 
 /// Classifies an open/list error into the not-collected finding (see `codes`).

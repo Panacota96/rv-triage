@@ -450,8 +450,16 @@ fn pipeline(
     let mut hashed_seq: BTreeMap<u64, u64> = BTreeMap::new();
     let mut bytes_before = 0u64;
     let mut errors = 0u64;
-    let mut cancelled = false;
     let mut last_progress = Instant::now() - PROGRESS_EVERY;
+    // A collection cancelled during the copy still re-reads what is already in the package, so every packaged
+    // file gets its re-read check, register row and reports (the packaged files are small next to the copy).
+    let never = AtomicBool::new(false);
+    let cancel: &AtomicBool = if phase.as_ref().is_some_and(|p| p.cancelled) {
+        &never
+    } else {
+        cancel
+    };
+    let mut cancelled = phase.as_ref().is_some_and(|p| p.cancelled);
 
     for item in &items {
         if cancel.load(Ordering::Relaxed) {
@@ -644,8 +652,7 @@ fn pipeline(
     // Collection: targets that are not in the package get their own entry (reports, not the hash register).
     let registered_items = results.len();
     if let Some(p) = &phase {
-        for n in &p.not_collected {
-            let seq = log.entries();
+        for (n, &seq) in p.not_collected.iter().zip(&p.not_collected_seq) {
             results.push(ItemResult {
                 index: results.len() as u64 + 1,
                 path: PathBuf::from(&n.source_display),
@@ -1155,6 +1162,56 @@ mod tests {
         .unwrap();
         let v = crate::verify::verify_log(&s.log_dir.join("audit.jsonl")).unwrap();
         assert_eq!(v.outputs.unwrap().mismatched, 1);
+    }
+
+    #[test]
+    fn collection_cancelled_during_copy_still_rereads_the_package() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        windows_root(src.path());
+        let mut c = cfg(PathBuf::new(), out.path().into());
+        c.inputs = vec![];
+        c.langs = vec!["en".into()];
+        c.collect = Some(crate::collect::CollectOptions {
+            source: crate::collect::SourceSpec::Directory(src.path().into()),
+            ..Default::default()
+        });
+        let cancel = AtomicBool::new(false);
+        // Cancel as soon as the first artifact is in the package.
+        let s = run(
+            &c,
+            &mut |e| {
+                if matches!(e, Event::Artifact { group, .. } if group != "volatile") {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+            &cancel,
+        )
+        .unwrap();
+        assert!(s.cancelled);
+        // system.json + the one artifact copied before the cancel, both re-read and registered.
+        assert_eq!(s.items, 3, "{:?}", s); // + the volatile not-available entry
+        let csv = std::fs::read_to_string(s.log_dir.join("hashes.csv")).unwrap();
+        assert_eq!(csv.lines().count(), 3, "{}", csv);
+        let v = crate::verify::verify_log(&s.log_dir.join("audit.jsonl")).unwrap();
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+        // The not-collected entry's reports point at its own artifact_not_collected audit entry.
+        let entries: Vec<Value> = std::fs::read_to_string(s.log_dir.join("audit.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let seq = entries
+            .iter()
+            .find(|e| e["action"] == "artifact_not_collected")
+            .unwrap()["seq"]
+            .clone();
+        let tech: Value = serde_json::from_str(
+            &std::fs::read_to_string(s.report_dir.join("items/00003-volatile/technical.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(tech["audit"]["first_seq"], seq);
     }
 
     #[test]

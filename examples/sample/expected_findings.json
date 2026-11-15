@@ -4,7 +4,7 @@
   "exit_code": 0,
   "collected": {
     "volatile/system.json": [
-      "COLLECTED_API"
+      "CAPTURED_SNAPSHOT"
     ],
     "artifacts/browsers/Users/ana.ruiz/AppData/Local/Microsoft/Edge/User Data/Default/History": [
       "COLLECTED_API"

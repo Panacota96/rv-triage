@@ -146,10 +146,9 @@ reports); the GUI shows them as *Step* text.
   and checks its sequence number.
 - Cancellation is an `AtomicBool`, checked between volatile lists, between files and after every chunk of a copy.
   A copy cancelled half-way is deleted from the package. The engine then writes the manifests,
-  `collection_finished` (`cancelled: true`), `run_cancelled`, `hashes.csv` and partial reports. Note: the re-read
-  loop sees the same flag and stops at once, so after a cancel during the copy the packaged files are listed in
-  the manifests and the audit log (`artifact_collected` with digests) but get no item report and no `hashes.csv`
-  row.
+  `collection_finished` (`cancelled: true`), still re-reads every file already in the package (so each one gets
+  its re-read check, `hashes.csv` row and item reports), then writes `run_cancelled` and the reports. A cancel
+  during that re-read of a run that was not cancelled during the copy stops the re-read.
 - A panic inside the NTFS parser (inconsistent metadata on a live volume) is caught and becomes a read error for
   that file, not an aborted collection.
 

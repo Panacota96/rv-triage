@@ -503,7 +503,11 @@ fn artifact_line(group: &str, source: &str, status: &str, code: &str) -> Option<
     if status == "not_collected" {
         return Some(format!("not collected: [{}] {} ({})", group, source, code));
     }
-    if code.is_empty() || code == codes::COLLECTED_API || code == codes::COLLECTED_RAW {
+    if code.is_empty()
+        || code == codes::COLLECTED_API
+        || code == codes::COLLECTED_RAW
+        || code == codes::CAPTURED_SNAPSHOT
+    {
         return None;
     }
     Some(format!("warning: [{}] {}: {}", group, source, code))

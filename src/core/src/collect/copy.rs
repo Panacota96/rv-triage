@@ -244,7 +244,7 @@ pub fn write_snapshot(
         .map(|&a| (a, crate::hash::hash_bytes(bytes, a)))
         .collect();
     let mut all =
-        vec![Finding::new(codes::COLLECTED_API, Severity::Info).with("method", "snapshot")];
+        vec![Finding::new(codes::CAPTURED_SNAPSHOT, Severity::Info).with("file", rel.clone())];
     all.extend(findings);
     Ok(Collected {
         group: super::Group::Volatile,

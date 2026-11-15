@@ -23,6 +23,8 @@ pub const PACKAGE_DIR: &str = "package";
 pub struct PhaseResult {
     pub collected: Vec<Collected>,
     pub not_collected: Vec<NotCollected>,
+    /// Audit sequence number of each `artifact_not_collected` entry (same order as `not_collected`).
+    pub not_collected_seq: Vec<u64>,
     pub cancelled: bool,
     pub elevated: bool,
 }
@@ -60,13 +62,12 @@ fn record_collected(log: &mut AuditLog, c: &Collected) -> Result<u64, String> {
     Ok(seq)
 }
 
-fn record_not_collected(log: &mut AuditLog, n: &NotCollected) -> Result<(), String> {
+fn record_not_collected(log: &mut AuditLog, n: &NotCollected) -> Result<u64, String> {
     log.record(
         "artifact_not_collected",
         Some(&n.source_display),
         json!({"group": n.group, "source": n.source_path, "reason": n.reason, "finding": n.finding}),
     )
-    .map(|_| ())
     .map_err(|e| format!("audit log write failed: {}", e))
 }
 
@@ -225,8 +226,12 @@ pub fn collect_phase(
         .map_err(io)?;
 
     let package_dir = report_dir.join(PACKAGE_DIR);
-    std::fs::create_dir_all(&package_dir)
-        .map_err(|e| format!("cannot create {}: {}", package_dir.display(), e))?;
+    if let Err(e) = std::fs::create_dir_all(&package_dir) {
+        return fail(
+            log,
+            format!("cannot create {}: {}", package_dir.display(), e),
+        );
+    }
     let mut r = PhaseResult {
         elevated,
         ..PhaseResult::default()
@@ -237,7 +242,10 @@ pub fn collect_phase(
                         "tool": crate::TOOL_NAME, "version": crate::TOOL_VERSION});
     let mut b = serde_json::to_vec_pretty(&system).unwrap_or_default();
     b.push(b'\n');
-    let c = copy::write_snapshot(&package_dir, "system.json", &b, algos, run_findings)?;
+    let c = match copy::write_snapshot(&package_dir, "system.json", &b, algos, run_findings) {
+        Ok(c) => c,
+        Err(e) => return fail(log, e),
+    };
     record_collected(log, &c)?;
     r.collected.push(c);
 
@@ -275,7 +283,12 @@ pub fn collect_phase(
                     group: "volatile".into(),
                     source: c.source_display.clone(),
                     status: "collected".into(),
-                    code: codes::COLLECTED_API.into(),
+                    code: c
+                        .findings
+                        .iter()
+                        .max_by_key(|f| f.severity)
+                        .map(|f| f.code.clone())
+                        .unwrap_or_default(),
                 });
                 r.collected.push(c);
             }
@@ -288,7 +301,7 @@ pub fn collect_phase(
                 finding: Finding::new(codes::NOT_AVAILABLE_FROM_SOURCE, Severity::Info)
                     .with("source", opts.source.kind()),
             };
-            record_not_collected(log, &n)?;
+            r.not_collected_seq.push(record_not_collected(log, &n)?);
             r.not_collected.push(n);
         }
     }
@@ -317,7 +330,7 @@ pub fn collect_phase(
                     reason: format!("folder not listed: {}", message),
                     finding: not_collected_finding(error, raw_os_error, &message, elevated, live),
                 };
-                record_not_collected(log, &n)?;
+                r.not_collected_seq.push(record_not_collected(log, &n)?);
                 r.not_collected.push(n);
             }
         }
@@ -381,7 +394,7 @@ pub fn collect_phase(
                 r.collected.push(*c);
             }
             Outcome::NotCollected(n) => {
-                record_not_collected(log, &n)?;
+                r.not_collected_seq.push(record_not_collected(log, &n)?);
                 sink(&Event::Artifact {
                     group: n.group.name().into(),
                     source: n.source_display.clone(),

@@ -67,7 +67,7 @@ def main() -> None:
         "not in the package (manifest.json not_collected[].finding, keyed by group).",
         "source_kind": "directory",
         "exit_code": 0,
-        "collected": {"volatile/system.json": ["COLLECTED_API"], **{r[0]: ["COLLECTED_API"] for r in rows}},
+        "collected": {"volatile/system.json": ["CAPTURED_SNAPSHOT"], **{r[0]: ["COLLECTED_API"] for r in rows}},
         "not_collected": {"volatile": ["NOT_AVAILABLE_FROM_SOURCE"]},
     }
     (HERE / "expected_findings.json").write_text(

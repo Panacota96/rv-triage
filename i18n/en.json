@@ -194,11 +194,16 @@
       "title": "Not available from this source",
       "shows": "Volatile data exists only on a running system; this run read a %{source} source.",
       "does_not_prove": "It does not show anything about the system that the image or folder came from."
+    },
+    "CAPTURED_SNAPSHOT": {
+      "title": "Captured from the running system",
+      "shows": "The tool wrote %{file} from what the running system reported (it is not a copy of a file on the volume).",
+      "does_not_prove": "It does not show that the system reported everything: protected processes and kernel-level malware can hide entries."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "Type detection uses a limited table of common file signatures; unknown types are reported as unknown, not as suspicious.",
-    "TIMESTAMPS_FROM_FILESYSTEM": "Modification times come from the file system of the examined copy and may differ from the original source.",
+    "TIMESTAMPS_FROM_FILESYSTEM": "Modification times are those the source file system recorded ($STANDARD_INFORMATION), read at the time of the copy; they can be changed by software and are not proof of when content was written.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "A result without findings does not prove that a file is authentic or unaltered before acquisition.",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY": "A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that the examined copy matches the original source.",
     "EXECUTION_LEAVES_TRACES": "Running any program on the machine leaves traces of its own (prefetch, Amcache, the USB device entries in the registry): they are expected and must not be read as suspect activity.",
