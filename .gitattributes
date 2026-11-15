@@ -7,3 +7,4 @@
 *.pdf binary
 examples/sample/evidence/** binary
 tests/golden/*.zip binary
+src/core/tests/fixtures/*.img.gz binary

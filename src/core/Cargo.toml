@@ -36,6 +36,8 @@ const-oid.workspace = true
 rsa.workspace = true
 # `oid`: RSA PKCS#1 v1.5 verification of TSA tokens needs the digest OIDs.
 sha2-legacy = { workspace = true, features = ["oid"] }
+ntfs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+flate2.workspace = true
