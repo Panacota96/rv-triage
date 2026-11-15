@@ -48,6 +48,11 @@ tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
 
+# Live capture hashes every running executable: an unoptimised SHA-256 makes debug builds and tests ~10x
+# slower, so the digest crate is optimised even in dev/test profiles (no effect on release output).
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
