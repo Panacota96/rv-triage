@@ -51,6 +51,9 @@ pub struct RunConfig {
     pub evidence_ids: Vec<String>,
     /// Intake (registers evidence) or analysis (verifies against the registry). Default: [`crate::CASE_ROLE`].
     pub case_role: CaseRole,
+    /// Live triage collection (`rv-triage collect`). None = the reference input pipeline (files and folders
+    /// given as inputs, re-hashed in place), kept for the shared case-folder machinery and its tests.
+    pub collect: Option<crate::collect::CollectOptions>,
 }
 
 impl Default for RunConfig {
@@ -76,6 +79,7 @@ impl Default for RunConfig {
             case_dir: None,
             evidence_ids: vec![],
             case_role: crate::CASE_ROLE,
+            collect: None,
         }
     }
 }
@@ -273,6 +277,20 @@ pub fn run(
             cfg.jurisdiction
         ));
     }
+    // A live collection must not write anything (not even the log folder) on the system volume of the machine
+    // being collected unless the examiner allowed it: refuse before the first file is created.
+    if let Some(opts) = &cfg.collect
+        && opts.source == crate::collect::SourceSpec::Live
+        && !opts.allow_same_volume
+    {
+        let drive = crate::collect::host::system_drive();
+        if crate::collect::host::same_volume(&cfg.out_dir, &drive) {
+            return Err(crate::collect::phase::same_volume_refusal(
+                &cfg.out_dir,
+                &drive,
+            ));
+        }
+    }
     let run_id = new_run_id();
     let Some(case_dir) = &cfg.case_dir else {
         let log_dir = cfg.out_dir.join("logs").join(&run_id);
@@ -324,7 +342,7 @@ fn pipeline(
             "jurisdiction": cfg.jurisdiction, "tsa_url": cfg.tsa_url,
             "sign_cert": cfg.sign_cert.as_ref().map(|p| p.display().to_string()),
             "case_dir": cfg.case_dir.as_ref().map(|p| p.display().to_string()),
-            "evidence_ids": cfg.evidence_ids,
+            "evidence_ids": cfg.evidence_ids, "collect": cfg.collect,
         }),
     )
     .map_err(io)?;
@@ -385,14 +403,42 @@ fn pipeline(
         }
     };
 
-    let items = match collect(&cfg.inputs, cfg.input_list.as_deref(), cfg.recursive) {
-        Ok(i) => i,
-        Err(e) => {
-            log.record("error", None, json!({"stage": "input", "message": e}))
-                .map_err(io)?;
-            log.record("run_failed", None, json!({"reason": e}))
-                .map_err(io)?;
-            return Err(e);
+    // Collection (rv-triage collect): the items are the packaged files, re-read below and compared with the
+    // digests taken while they were copied.
+    let mut phase: Option<crate::collect::phase::PhaseResult> = None;
+    let items = if let Some(opts) = &cfg.collect {
+        let r = crate::collect::phase::collect_phase(
+            opts,
+            &cfg.out_dir,
+            &report_dir,
+            &cfg.algorithms,
+            &mut log,
+            sink,
+            cancel,
+            started,
+        )?;
+        let items = r
+            .collected
+            .iter()
+            .enumerate()
+            .map(|(i, c)| crate::input::Item {
+                index: i as u64 + 1,
+                path: c.package_path.clone(),
+                size: c.bytes,
+            })
+            .collect::<Vec<_>>();
+        phase = Some(r);
+        items
+    } else {
+        match collect(&cfg.inputs, cfg.input_list.as_deref(), cfg.recursive) {
+            Ok(i) => i,
+            Err(e) => {
+                log.record("error", None, json!({"stage": "input", "message": e}))
+                    .map_err(io)?;
+                log.record("run_failed", None, json!({"reason": e}))
+                    .map_err(io)?;
+                return Err(e);
+            }
         }
     };
     let total_items = items.len() as u64;
@@ -418,8 +464,16 @@ fn pipeline(
     let mut hashed_seq: BTreeMap<u64, u64> = BTreeMap::new();
     let mut bytes_before = 0u64;
     let mut errors = 0u64;
-    let mut cancelled = false;
     let mut last_progress = Instant::now() - PROGRESS_EVERY;
+    // A collection cancelled during the copy still re-reads what is already in the package, so every packaged
+    // file gets its re-read check, register row and reports (the packaged files are small next to the copy).
+    let never = AtomicBool::new(false);
+    let cancel: &AtomicBool = if phase.as_ref().is_some_and(|p| p.cancelled) {
+        &never
+    } else {
+        cancel
+    };
+    let mut cancelled = phase.as_ref().is_some_and(|p| p.cancelled);
 
     for item in &items {
         if cancel.load(Ordering::Relaxed) {
@@ -430,7 +484,14 @@ fn pipeline(
         let modified = std::fs::metadata(&item.path)
             .and_then(|m| m.modified())
             .ok();
-        let modified_utc = modified.map(utc_from);
+        let packaged = phase
+            .as_ref()
+            .map(|p| &p.collected[(item.index - 1) as usize]);
+        // A packaged copy's own mtime is the copy time: report the source's modification time instead.
+        let modified_utc = match packaged {
+            Some(c) => c.before.as_ref().and_then(|m| m.si_modified.clone()),
+            None => modified.map(utc_from),
+        };
         sink(&Event::ItemStarted {
             index: item.index,
             path: path_s.clone(),
@@ -506,12 +567,42 @@ fn pipeline(
                     path: path_s.clone(),
                     hashes,
                 });
-                let a = analyze(&result.file_name(), out.bytes, &out.head);
+                if let Some(c) = packaged {
+                    result.detected_type = Some(c.group.name().to_string());
+                    result.findings = c
+                        .findings
+                        .iter()
+                        .map(|f| match f.code.as_str() {
+                            crate::collect::codes::COLLECTED_RAW
+                            | crate::collect::codes::COLLECTED_API => f
+                                .clone()
+                                .with("source", c.source_display.clone())
+                                .with("package", c.package_rel.clone()),
+                            _ => f.clone(),
+                        })
+                        .collect();
+                    for ((alg, now), (_, then)) in out.digests.iter().zip(&c.digests) {
+                        if now != then || out.bytes != c.bytes {
+                            result.findings.push(
+                                Finding::new(
+                                    crate::collect::codes::COPY_REREAD_MISMATCH,
+                                    Severity::High,
+                                )
+                                .with("algorithm", alg.name())
+                                .with("copied", then.clone())
+                                .with("reread", now.clone()),
+                            );
+                            break;
+                        }
+                    }
+                } else {
+                    let a = analyze(&result.file_name(), out.bytes, &out.head);
+                    result.detected_type = a.detected_type;
+                    result.extension = a.extension;
+                    result.findings = a.findings;
+                }
                 result.size = out.bytes;
                 result.hashes = out.digests;
-                result.detected_type = a.detected_type;
-                result.extension = a.extension;
-                result.findings = a.findings;
                 if let Some(l) = link.as_deref_mut() {
                     case_check_item(l, cfg.case_role, &mut result, &mut log, sink)?;
                 }
@@ -572,9 +663,37 @@ fn pipeline(
         register_items(l, &mut results, &hashed_seq, &mut log, sink)?;
     }
 
-    // Duplicates (cross-item finding).
+    // Collection: targets that are not in the package get their own entry (reports, not the hash register).
+    let registered_items = results.len();
+    if let Some(p) = &phase {
+        for (n, &seq) in p.not_collected.iter().zip(&p.not_collected_seq) {
+            results.push(ItemResult {
+                index: results.len() as u64 + 1,
+                path: PathBuf::from(&n.source_display),
+                size: 0,
+                modified_utc: None,
+                hashes: vec![],
+                detected_type: Some(n.group.name().to_string()),
+                extension: None,
+                findings: vec![n.finding.clone().with("source", n.source_display.clone())],
+                error: None,
+                audit_first_seq: seq,
+                audit_last_seq: seq,
+                evidence_id: None,
+                case_status: None,
+                intake_utc: None,
+            });
+        }
+    }
+
+    // Duplicates (cross-item finding; not for collections, where identical empty logs are normal).
     let primary = cfg.algorithms[0];
-    for (hash, idx) in report::duplicate_groups(&results) {
+    let groups = if phase.is_some() {
+        vec![]
+    } else {
+        report::duplicate_groups(&results)
+    };
+    for (hash, idx) in groups {
         let names: Vec<String> = idx.iter().map(|&i| results[i].file_name()).collect();
         log.record("duplicate_group", None, json!({"algorithm": primary, "hash": hash, "items": idx.iter().map(|&i| results[i].index).collect::<Vec<_>>()})).map_err(io)?;
         for &i in &idx {
@@ -602,7 +721,7 @@ fn pipeline(
             .collect::<Vec<_>>()
             .join(",")
     );
-    for r in &results {
+    for r in results.iter().take(registered_items) {
         let hashes: Vec<String> = cfg
             .algorithms
             .iter()
@@ -993,6 +1112,151 @@ mod tests {
         assert!(csv.starts_with("index,path,size,sha256,md5,"));
     }
 
+    fn windows_root(dir: &Path) {
+        for (rel, body) in [
+            ("Windows/System32/config/SYSTEM", &b"regf-system"[..]),
+            ("Windows/System32/config/SYSTEM.LOG1", b"log1"),
+            ("Windows/System32/winevt/Logs/Security.evtx", b"ElfFile sec"),
+            ("Windows/System32/winevt/Logs/Empty.evtx", b""),
+            ("Windows/Prefetch/CMD.EXE-0BD30981.pf", b"MAMpf"),
+            ("Windows/System32/Tasks/Updater", b"<Task/>"),
+            ("Users/ana/NTUSER.DAT", b"regf-ana"),
+            (
+                "Users/ana/AppData/Local/Microsoft/Edge/User Data/Default/History",
+                b"SQLite format 3 ",
+            ),
+        ] {
+            let p = dir.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, body).unwrap();
+        }
+    }
+
+    #[test]
+    fn collection_packages_rereads_and_verifies() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        windows_root(src.path());
+        let mut c = cfg(PathBuf::new(), out.path().into());
+        c.inputs = vec![];
+        c.langs = vec!["en".into()];
+        c.collect = Some(crate::collect::CollectOptions {
+            source: crate::collect::SourceSpec::Directory(src.path().into()),
+            ..Default::default()
+        });
+        let mut events = Vec::new();
+        let s = run(&c, &mut |e| events.push(e.clone()), &AtomicBool::new(false)).unwrap();
+        // system.json + 8 files collected; volatile not available from a folder.
+        assert_eq!(s.items, 10, "{:?}", s);
+        let pkg = s.report_dir.join("package");
+        assert_eq!(
+            std::fs::read(pkg.join("artifacts/hives/Windows/System32/config/SYSTEM")).unwrap(),
+            b"regf-system"
+        );
+        for f in ["manifest.csv", "manifest.json", "volatile/system.json"] {
+            assert!(pkg.join(f).exists(), "{}", f);
+        }
+        let csv = std::fs::read_to_string(s.log_dir.join("hashes.csv")).unwrap();
+        assert_eq!(csv.lines().count(), 10, "{}", csv); // header + 9 packaged files, not the volatile entry
+        let v = crate::verify::verify_log(&s.log_dir.join("audit.jsonl")).unwrap();
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+        let o = v.outputs.unwrap();
+        assert_eq!(o.mismatched + o.missing + o.rejected, 0);
+        assert!(o.verified >= 11, "{:?}", o); // 9 package files + 2 manifests (+ reports)
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::Artifact { status, .. } if status == "collected"))
+        );
+        // A packaged file edited after the run is caught.
+        std::fs::write(
+            pkg.join("artifacts/tasks/Windows/System32/Tasks/Updater"),
+            b"<Task>x</Task>",
+        )
+        .unwrap();
+        let v = crate::verify::verify_log(&s.log_dir.join("audit.jsonl")).unwrap();
+        assert_eq!(v.outputs.unwrap().mismatched, 1);
+    }
+
+    #[test]
+    fn collection_cancelled_during_copy_still_rereads_the_package() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        windows_root(src.path());
+        let mut c = cfg(PathBuf::new(), out.path().into());
+        c.inputs = vec![];
+        c.langs = vec!["en".into()];
+        c.collect = Some(crate::collect::CollectOptions {
+            source: crate::collect::SourceSpec::Directory(src.path().into()),
+            ..Default::default()
+        });
+        let cancel = AtomicBool::new(false);
+        // Cancel as soon as the first artifact is in the package.
+        let s = run(
+            &c,
+            &mut |e| {
+                if matches!(e, Event::Artifact { group, .. } if group != "volatile") {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+            &cancel,
+        )
+        .unwrap();
+        assert!(s.cancelled);
+        // system.json + the one artifact copied before the cancel, both re-read and registered.
+        assert_eq!(s.items, 3, "{:?}", s); // + the volatile not-available entry
+        let csv = std::fs::read_to_string(s.log_dir.join("hashes.csv")).unwrap();
+        assert_eq!(csv.lines().count(), 3, "{}", csv);
+        let v = crate::verify::verify_log(&s.log_dir.join("audit.jsonl")).unwrap();
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+        // The not-collected entry's reports point at its own artifact_not_collected audit entry.
+        let entries: Vec<Value> = std::fs::read_to_string(s.log_dir.join("audit.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let seq = entries
+            .iter()
+            .find(|e| e["action"] == "artifact_not_collected")
+            .unwrap()["seq"]
+            .clone();
+        let tech: Value = serde_json::from_str(
+            &std::fs::read_to_string(s.report_dir.join("items/00003-volatile/technical.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(tech["audit"]["first_seq"], seq);
+    }
+
+    /// The refusal happens before anything is written: not even the log folder exists afterwards.
+    #[cfg(windows)]
+    #[test]
+    fn live_collection_on_the_system_volume_writes_nothing() {
+        let drive = crate::collect::host::system_drive();
+        let tmp = tempfile::tempdir().unwrap();
+        if !crate::collect::host::same_volume(tmp.path(), &drive) {
+            return; // temp folder not on the system volume on this machine
+        }
+        let out = tmp.path().join("out");
+        let mut c = cfg(PathBuf::new(), out.clone());
+        c.collect = Some(crate::collect::CollectOptions::default());
+        let e = run(&c, &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("system volume"), "{}", e);
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn collection_refuses_a_source_that_does_not_open() {
+        let out = tempfile::tempdir().unwrap();
+        let mut c = cfg(PathBuf::new(), out.path().into());
+        c.collect = Some(crate::collect::CollectOptions {
+            source: crate::collect::SourceSpec::Directory(out.path().join("missing")),
+            ..Default::default()
+        });
+        let e = run(&c, &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("not a folder"), "{}", e);
+    }
+
     #[test]
     fn cancel_before_start_writes_partial_reports() {
         let ev = tempfile::tempdir().unwrap();
@@ -1011,7 +1275,7 @@ mod tests {
     }
 
     fn sample_copy(dir: &Path) -> PathBuf {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/case-evidence");
         let ev = dir.join("evidence");
         std::fs::create_dir_all(&ev).unwrap();
         for e in std::fs::read_dir(src).unwrap() {

@@ -14,8 +14,8 @@ fn main() -> eframe::Result {
                 .expect("bundled icon is a valid PNG"),
             )
             .with_title("RV Triage — Rakvor")
-            .with_inner_size([860.0, 720.0])
-            .with_min_inner_size([640.0, 520.0])
+            .with_inner_size([1240.0, 820.0])
+            .with_min_inner_size([900.0, 600.0])
             .with_drag_and_drop(true),
         // wgpu falls back to a software adapter (WARP on Windows), so the GUI also runs on
         // forensic VMs without a GPU driver.
@@ -25,8 +25,8 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "RV Triage",
         options,
-        // Files or folders dropped on the .exe icon (or passed on the command line) are pre-loaded;
-        // `--case-dir DIR` (RV Hub) presets the case folder.
+        // A folder or volume image dropped on the .exe icon (or passed on the command line) becomes the source;
+        // `--elevation-requested-at` comes from "Restart as administrator".
         Box::new(|_cc| {
             Ok(Box::new(rv_triage_gui::app::HashInvApp::from_launch(
                 rv_triage_gui::launch::parse_launch_args(std::env::args_os().skip(1)),

@@ -51,6 +51,18 @@ pub enum Event {
         elapsed_ms: u64,
         eta_ms: Option<u64>,
     },
+    /// Collection phase started: preflight | volatile | copy (`total` = steps or files in the phase).
+    Phase {
+        phase: String,
+        total: u64,
+    },
+    /// One artifact collected or not: `status` = collected | not_collected; `code` = the most severe finding.
+    Artifact {
+        group: String,
+        source: String,
+        status: String,
+        code: String,
+    },
     ReportWritten {
         kind: String,
         path: String,

@@ -21,8 +21,10 @@ pub const SCHEMA_TECHNICAL: &str = "rakvor.item-technical/1";
 pub const SCHEMA_SUMMARY: &str = "rakvor.item-summary/1";
 
 /// Run-level limitations, always printed (what this tool cannot tell you).
-pub const LIMITATIONS: [&str; 4] = [
-    "SIGNATURE_TABLE_LIMITED",
+pub const LIMITATIONS: [&str; 6] = [
+    "EXECUTION_LEAVES_TRACES",
+    "RAW_READ_COMMITTED_STATE",
+    "NO_MEMORY_IMAGE",
     "TIMESTAMPS_FROM_FILESYSTEM",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY",

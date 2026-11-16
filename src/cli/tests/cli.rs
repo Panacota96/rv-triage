@@ -1,8 +1,13 @@
-//! End-to-end tests of the rv-triage binary: the contract every Rakvor CLI must meet.
+//! End-to-end tests of the rv-triage binary: the collect workflow and the contract every Rakvor CLI must meet.
+//!
+//! The sample is examples/sample/source (a synthetic folder laid out like a Windows volume root), collected as a
+//! directory source. Its ground truth was computed independently (Python hashlib, examples/sample/make_expected.py):
+//! expected_hashes.csv (package paths, sizes, SHA-256, MD5) and expected_findings.json (finding codes).
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use rv_triage_core::{CASE_ROLE, CaseRole, HashAlgo, RunConfig, run};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -12,6 +17,14 @@ fn bin() -> Command {
     let mut c = Command::cargo_bin("rv-triage").unwrap();
     c.env("RV_NO_TIMESTAMP", "1"); // offline by default; trust_* tests use a local test TSA
     c
+}
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn python() -> String {
+    std::env::var("RV_TEST_PYTHON").unwrap_or_else(|_| "python3".into())
 }
 
 /// The fake TSA process, killed when dropped, so a failing assertion cannot leave it running. An orphaned
@@ -27,8 +40,8 @@ impl Drop for TsaServer {
 
 /// Starts tests/fake_tsa.py (needs Python with pyhanko). Returns None to skip when unavailable.
 fn test_pki(dir: &Path) -> Option<(TsaServer, String)> {
-    let py = std::env::var("RV_TEST_PYTHON").unwrap_or_else(|_| "python3".into());
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fake_tsa.py");
+    let py = python();
+    let script = root().join("tests/fake_tsa.py");
     let ok = std::process::Command::new(&py)
         .args(["-c", "import pyhanko"])
         .status()
@@ -58,8 +71,14 @@ fn test_pki(dir: &Path) -> Option<(TsaServer, String)> {
     Some((server, line.trim().to_string()))
 }
 
+/// The synthetic volume root collected by the sample run.
 fn sample() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence")
+    root().join("examples/sample/source")
+}
+
+/// Three loose files used to seed a case folder through the core (the case machinery's reference input pipeline).
+fn case_fixture() -> PathBuf {
+    root().join("tests/fixtures/case-evidence")
 }
 
 fn only_dir(p: &Path) -> PathBuf {
@@ -71,9 +90,71 @@ fn only_dir(p: &Path) -> PathBuf {
         .path()
 }
 
+/// The value of a `  name: value` line of the run summary.
+fn summary_value(stdout: &[u8], name: &str) -> String {
+    let text = String::from_utf8_lossy(stdout);
+    text.lines()
+        .find_map(|l| l.trim().strip_prefix(&format!("{}:", name)))
+        .unwrap_or_else(|| panic!("no {} line in:\n{}", name, text))
+        .trim()
+        .to_string()
+}
+
+/// expected_hashes.csv: package path → (size, sha256, md5).
+fn expected_hashes() -> BTreeMap<String, (u64, String, String)> {
+    let text = std::fs::read_to_string(root().join("examples/sample/expected_hashes.csv")).unwrap();
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some("package_path,size,sha256,md5"));
+    lines
+        .map(|l| {
+            let f: Vec<&str> = l.split(',').collect();
+            assert_eq!(f.len(), 4, "{}", l);
+            (
+                f[0].to_string(),
+                (f[1].parse().unwrap(), f[2].to_string(), f[3].to_string()),
+            )
+        })
+        .collect()
+}
+
+/// Every file under `dir`, as `/`-separated paths relative to it.
+fn files_under(dir: &Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                let rel = p.strip_prefix(dir).unwrap();
+                out.push(
+                    rel.components()
+                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                        .join("/"),
+                );
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn collect_sample(out: &Path, extra: &[&str]) -> std::process::Output {
+    bin()
+        .args(["collect", "--source"])
+        .arg(sample())
+        .arg("--out")
+        .arg(out)
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
 #[test]
-fn help_has_every_required_section() {
-    let out = bin().args(["scan", "--help"]).output().unwrap();
+fn collect_help_has_every_required_section() {
+    let out = bin().args(["collect", "--help"]).output().unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
     for section in [
         "DESCRIPTION:",
@@ -85,36 +166,116 @@ fn help_has_every_required_section() {
     ] {
         assert!(text.contains(section), "missing {}", section);
     }
-    for flag in [
-        "--input",
-        "--input-list",
-        "--recursive",
-        "--hash",
+    let flags = [
         "--out",
+        "--source",
+        "--groups",
+        "--users",
+        "--allow-same-volume",
+        "--hash",
         "--lang",
         "--actor",
         "--case",
         "--progress",
-        "--case-dir",
-        "--evidence",
-    ] {
+        "--jurisdiction",
+        "--tsa-url",
+        "--no-timestamp",
+        "--sign-cert",
+        "--sign-pass-env",
+    ];
+    for flag in flags {
         assert!(text.contains(flag), "missing {}", flag);
+    }
+    // The old scan options are gone (--case-dir only appears in the rv-hashinv example).
+    for gone in ["--input", "--recursive", "--case-dir <", "--evidence"] {
+        assert!(
+            !text.contains(gone),
+            "{} belongs to the old scan verb",
+            gone
+        );
     }
     // every option documents a default and an example
     assert!(
-        text.matches("Default:").count() >= 9,
+        text.matches("Default:").count() >= flags.len(),
         "each option needs a Default: line"
     );
     assert!(
-        text.matches("Example:").count() >= 9,
+        text.matches("Example:").count() >= flags.len(),
         "each option needs an Example: line"
     );
+    // Forensic notes specific to a live collection, with Windows paths in the examples.
+    for note in [
+        "removable media",
+        "raw NTFS",
+        "NOT_COLLECTED_NO_ADMIN",
+        "--allow-same-volume",
+        "prefetch",
+        "Amcache",
+        "USB",
+        "No RAM image",
+        "E:\\triage",
+        "package/",
+        "manifest.csv",
+        "manifest.json",
+    ] {
+        assert!(text.contains(note), "missing {}", note);
+    }
+    // Fixed width: nothing is re-wrapped past 100 columns.
+    assert!(text.lines().all(|l| l.chars().count() <= 100));
+    // The old verb is gone.
+    bin().args(["scan", "--help"]).assert().code(2);
+}
+
+#[test]
+fn out_is_required_with_a_clear_error() {
+    bin()
+        .args(["collect", "--source"])
+        .arg(sample())
+        .assert()
+        .code(2)
+        .stderr(
+            predicate::str::contains("--out is required")
+                .and(predicate::str::contains("USB or network drive")),
+        );
+}
+
+#[test]
+fn unknown_group_names_the_valid_groups() {
+    let out = tempfile::tempdir().unwrap();
+    bin()
+        .args(["collect", "--groups", "hives,ram", "--source"])
+        .arg(sample())
+        .arg("-o")
+        .arg(out.path())
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "unknown group 'ram': use volatile, evtx, hives, prefetch, browsers, tasks or all",
+        ));
+    assert!(!out.path().join("logs").exists(), "nothing written");
+}
+
+#[test]
+fn missing_source_is_refused_before_anything_is_written() {
+    let out = tempfile::tempdir().unwrap();
+    let missing = out.path().join("no-such-image.dd");
+    bin()
+        .args(["collect", "--progress", "none", "--source"])
+        .arg(&missing)
+        .arg("-o")
+        .arg(out.path().join("out"))
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("no such file or folder"));
+    assert!(!out.path().join("out").exists());
 }
 
 #[test]
 fn three_hash_algorithms_are_a_usage_error() {
+    let out = tempfile::tempdir().unwrap();
     bin()
-        .args(["scan", "-i", "."])
+        .args(["collect", "-o"])
+        .arg(out.path())
         .args(["--hash", "md5,sha1,sha256"])
         .assert()
         .code(2)
@@ -123,39 +284,30 @@ fn three_hash_algorithms_are_a_usage_error() {
 
 #[test]
 fn unknown_language_and_algorithm_are_usage_errors() {
-    bin()
-        .args(["scan", "-i", ".", "--lang", "de"])
-        .assert()
-        .code(2);
-    bin()
-        .args(["scan", "-i", ".", "--hash", "crc32"])
-        .assert()
-        .code(2);
-}
-
-#[test]
-fn missing_input_is_a_runtime_error_and_is_audited() {
     let out = tempfile::tempdir().unwrap();
     bin()
-        .args(["scan", "-i", "does-not-exist", "-o"])
+        .args(["collect", "--lang", "de", "-o"])
         .arg(out.path())
-        .args(["--progress", "none"])
         .assert()
-        .code(1);
-    let log = only_dir(&out.path().join("logs")).join("audit.jsonl");
-    let text = std::fs::read_to_string(log).unwrap();
-    assert!(text.contains("\"run_failed\""));
+        .code(2);
+    bin()
+        .args(["collect", "--hash", "crc32", "-o"])
+        .arg(out.path())
+        .assert()
+        .code(2);
 }
 
+/// The whole sample workflow: collect the synthetic volume, check the package and the findings against the
+/// independently computed ground truth, verify the log with the tool and with the Python checker, then edit one
+/// packaged file and expect both to catch it.
 #[test]
-fn bulk_scan_writes_reports_logs_and_verifiable_chain() {
+fn collect_sample_matches_ground_truth_and_verifies() {
     let out = tempfile::tempdir().unwrap();
-    bin()
-        .args(["scan", "-i"])
-        .arg(sample())
-        .args([
+    let o = collect_sample(
+        out.path(),
+        &[
             "--hash",
-            "sha256,blake3",
+            "sha256,md5",
             "--lang",
             "all",
             "--case",
@@ -164,14 +316,134 @@ fn bulk_scan_writes_reports_logs_and_verifiable_chain() {
             "ci",
             "--progress",
             "none",
-            "-o",
-        ])
-        .arg(out.path())
-        .assert()
-        .code(0)
-        .stdout(predicate::str::contains("items: 3"));
-    let logs = only_dir(&out.path().join("logs"));
-    let reports = only_dir(&out.path().join("reports"));
+        ],
+    );
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let expected = expected_hashes();
+    let package = PathBuf::from(summary_value(&o.stdout, "package"));
+    let logs = PathBuf::from(summary_value(&o.stdout, "logs"));
+    assert_eq!(
+        summary_value(&o.stdout, "source"),
+        "directory",
+        "source line"
+    );
+    let counts = summary_value(&o.stdout, "collected");
+    assert!(
+        counts.starts_with(&format!("{}  not collected: 1", expected.len() + 1)),
+        "{}",
+        counts
+    );
+    assert_eq!(summary_value(&o.stdout, "audit head").len(), 64);
+    let next = summary_value(&o.stdout, "next");
+    assert!(next.contains("rv-hashinv scan -i"), "{}", next);
+    assert!(package.ends_with("package") && package.starts_with(out.path().join("reports")));
+
+    // The package: exactly the expected artifact files, byte for byte (sizes and digests from Python hashlib).
+    let files = files_under(&package);
+    let artifacts: Vec<&String> = files
+        .iter()
+        .filter(|f| f.starts_with("artifacts/"))
+        .collect();
+    assert_eq!(
+        artifacts,
+        expected.keys().collect::<Vec<_>>(),
+        "package artifacts"
+    );
+    for (rel, (size, sha256, md5)) in &expected {
+        let bytes = std::fs::read(package.join(rel)).unwrap();
+        assert_eq!(bytes.len() as u64, *size, "{}", rel);
+        assert_eq!(
+            &rv_triage_core::hash::hash_bytes(&bytes, HashAlgo::Sha256),
+            sha256,
+            "{}",
+            rel
+        );
+        assert_eq!(
+            &rv_triage_core::hash::hash_bytes(&bytes, HashAlgo::Md5),
+            md5,
+            "{}",
+            rel
+        );
+    }
+    for f in ["manifest.csv", "manifest.json", "volatile/system.json"] {
+        assert!(files.contains(&f.to_string()), "{}", f);
+    }
+    // manifest.csv agrees with the ground truth too (what the lab will read).
+    let manifest_csv = std::fs::read_to_string(package.join("manifest.csv")).unwrap();
+    assert!(
+        manifest_csv.starts_with(
+            "package_path,group,source,method,bytes,sha256,md5,truncated_at,findings\n"
+        ),
+        "{}",
+        manifest_csv
+    );
+    for (rel, (size, sha256, md5)) in &expected {
+        let row = manifest_csv
+            .lines()
+            .find(|l| l.starts_with(&format!("{},", rel)))
+            .unwrap_or_else(|| panic!("{} not in manifest.csv", rel));
+        let f: Vec<&str> = row.rsplitn(6, ',').collect();
+        // reversed: findings, truncated_at, md5, sha256, bytes, rest
+        assert_eq!(
+            (f[4], f[3], f[2], f[0]),
+            (
+                size.to_string().as_str(),
+                sha256.as_str(),
+                md5.as_str(),
+                "COLLECTED_API"
+            ),
+            "{}",
+            row
+        );
+    }
+
+    // Findings: per package path, and the volatile group a folder cannot provide.
+    let truth: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root().join("examples/sample/expected_findings.json")).unwrap(),
+    )
+    .unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(package.join("manifest.json")).unwrap()).unwrap();
+    let got: serde_json::Map<String, serde_json::Value> = manifest["collected"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["package_path"].as_str().unwrap().to_string(),
+                c["findings"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        serde_json::Value::Object(got),
+        truth["collected"],
+        "collected findings"
+    );
+    let mut missing = serde_json::Map::new();
+    for n in manifest["not_collected"].as_array().unwrap() {
+        missing
+            .entry(n["group"].as_str().unwrap())
+            .or_insert_with(|| serde_json::json!([]))
+            .as_array_mut()
+            .unwrap()
+            .push(n["finding"].clone());
+    }
+    assert_eq!(
+        serde_json::Value::Object(missing),
+        truth["not_collected"],
+        "not collected"
+    );
+    assert_eq!(truth["exit_code"], 0);
+
+    // The standard run outputs.
+    let reports = package.parent().unwrap();
     for f in ["audit.jsonl", "audit.log", "hashes.csv", "environment.json"] {
         assert!(logs.join(f).is_file(), "{}", f);
     }
@@ -180,108 +452,79 @@ fn bulk_scan_writes_reports_logs_and_verifiable_chain() {
             assert!(reports.join(format!("statistics.{}.{}", l, ext)).is_file());
         }
     }
-    let items: Vec<_> = std::fs::read_dir(reports.join("items")).unwrap().collect();
-    assert_eq!(items.len(), 3, "one folder per item");
-    for item in items {
-        let d = item.unwrap().path();
-        for f in [
-            "technical.json",
-            "summary.json",
-            "technical.es.pdf",
-            "summary.fr.html",
-        ] {
-            assert!(d.join(f).is_file(), "{} in {}", f, d.display());
-        }
-        let pdf = std::fs::read(d.join("technical.en.pdf")).unwrap();
-        assert!(pdf.starts_with(b"%PDF-") && pdf.ends_with(b"%%EOF\n"));
-    }
-    bin().arg("verify-log").arg(&logs).assert().code(0).stdout(
-        predicate::str::contains("chain intact").and(predicate::str::contains(
-            "truncation not detectable without a timestamp or case record",
-        )),
+    let items = std::fs::read_dir(reports.join("items")).unwrap().count();
+    assert_eq!(
+        items,
+        expected.len() + 2,
+        "one folder per packaged file + the volatile entry"
     );
 
-    // The standalone Python verifier: intact run, then a run folder without hashes.csv (reported as missing,
-    // the chain is still checked).
-    let py = std::env::var("RV_TEST_PYTHON").unwrap_or_else(|_| "python3".into());
-    let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/verify_chain.py");
-    if let Ok(o) = std::process::Command::new(&py)
-        .arg(&oracle)
-        .arg(&logs)
-        .output()
-    {
-        let blake3 = std::process::Command::new(&py)
-            .args(["-c", "import blake3"])
-            .status()
-            .is_ok_and(|s| s.success());
-        if blake3 {
-            assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout));
-        }
-        let csv = logs.join("hashes.csv");
-        let saved = std::fs::read(&csv).unwrap();
-        std::fs::remove_file(&csv).unwrap();
-        let o = std::process::Command::new(&py)
-            .arg(&oracle)
-            .arg(&logs)
-            .output()
-            .unwrap();
-        let text = String::from_utf8_lossy(&o.stdout);
-        assert_eq!(o.status.code(), Some(3), "{}", text);
-        assert!(
-            text.contains("chain: intact | register: MISSING"),
-            "{}",
-            text
-        );
-        std::fs::write(&csv, saved).unwrap();
-    }
-
-    // Every output the log records is re-hashed: an edited report or a deleted one is a problem (exit 3).
+    // verify-log: intact, every packaged file re-hashed.
     let ok = bin().arg("verify-log").arg(&logs).assert().code(0);
     let text = String::from_utf8_lossy(&ok.get_output().stdout).into_owned();
+    assert!(text.contains("chain intact"), "{}", text);
     let line = text
         .lines()
         .find_map(|l| l.trim().strip_prefix("outputs: "))
         .expect("outputs line");
     let (verified, rest) = line.split_once(" verified of ").unwrap();
     assert!(
-        rest.starts_with(&format!("{} recorded (blake3, sha256)", verified)),
+        rest.starts_with(&format!("{} recorded (md5, sha256)", verified)),
         "{}",
         line
     );
-    assert!(verified.parse::<u32>().unwrap() > 3 * 6, "{}", line);
-    let item = std::fs::read_dir(reports.join("items"))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .file_name()
-        .to_string_lossy()
-        .into_owned();
-    let technical = reports.join("items").join(&item).join("technical.json");
-    let saved = std::fs::read(&technical).unwrap();
-    std::fs::write(
-        &technical,
-        b"{\"edited\": true}
-",
-    )
-    .unwrap();
-    let stats = reports.join("statistics.json");
-    std::fs::rename(&stats, out.path().join("moved.json")).unwrap();
-    bin().arg("verify-log").arg(&logs).assert().code(3).stdout(
-        predicate::str::contains(format!(
-            "output reports/items/{}/technical.json: blake3 differs from audit entry #",
-            item
-        ))
-        .and(predicate::str::contains(
-            "output reports/statistics.json: missing",
-        ))
-        .and(predicate::str::contains("1 missing, 1 changed")),
+    assert!(
+        verified.parse::<usize>().unwrap() > expected.len() + 3,
+        "{}",
+        line
     );
-    std::fs::write(&technical, saved).unwrap();
-    std::fs::rename(out.path().join("moved.json"), &stats).unwrap();
-    bin().arg("verify-log").arg(&logs).assert().code(0);
 
-    // Tampering with one entry is detected.
+    // The independent Python checker agrees.
+    let oracle = root().join("tests/verify_chain.py");
+    let py = python();
+    let checked = std::process::Command::new(&py)
+        .arg(&oracle)
+        .arg(&logs)
+        .output();
+    let Ok(intact) = checked else {
+        assert!(
+            std::env::var("RV_TEST_PYTHON").is_err(),
+            "RV_TEST_PYTHON={} does not run",
+            py
+        );
+        eprintln!("skipped the Python checker: no {}", py);
+        return;
+    };
+    let t = String::from_utf8_lossy(&intact.stdout);
+    assert!(intact.status.success(), "{}", t);
+    assert!(
+        t.contains("chain: intact | register: matches | outputs: match"),
+        "{}",
+        t
+    );
+
+    // One packaged file edited after the run: verify-log exit 3 naming it, the Python checker MISMATCH.
+    let victim = "artifacts/tasks/Windows/System32/Tasks/RakvorSampleUpdater";
+    std::fs::write(package.join(victim), b"<Task>edited</Task>").unwrap();
+    bin()
+        .arg("verify-log")
+        .arg(&logs)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains(format!(
+            "output reports/package/{}",
+            victim
+        )));
+    let edited = std::process::Command::new(&py)
+        .arg(&oracle)
+        .arg(&logs)
+        .output()
+        .unwrap();
+    let t = String::from_utf8_lossy(&edited.stdout);
+    assert_eq!(edited.status.code(), Some(3), "{}", t);
+    assert!(t.contains("outputs: MISMATCH"), "{}", t);
+
+    // Tampering with one audit entry is detected.
     let p = logs.join("audit.jsonl");
     let text = std::fs::read_to_string(&p).unwrap();
     std::fs::write(
@@ -298,22 +541,61 @@ fn bulk_scan_writes_reports_logs_and_verifiable_chain() {
 }
 
 #[test]
-fn jsonl_progress_is_one_event_per_line_with_elapsed_time() {
+fn jsonl_progress_reports_phases_artifacts_and_elapsed_time() {
     let out = tempfile::tempdir().unwrap();
-    let o = bin()
-        .args(["scan", "-i"])
-        .arg(sample())
-        .args(["--progress", "jsonl", "-o"])
-        .arg(out.path())
-        .output()
-        .unwrap();
+    let o = collect_sample(out.path(), &["--progress", "jsonl"]);
+    assert_eq!(o.status.code(), Some(0));
     let text = String::from_utf8(o.stdout).unwrap();
     let events: Vec<serde_json::Value> = text
         .lines()
         .map(|l| serde_json::from_str(l).expect("valid JSON line"))
         .collect();
-    assert_eq!(events.first().unwrap()["event"], "run_started");
+    let phases: Vec<&str> = events
+        .iter()
+        .filter(|e| e["event"] == "phase")
+        .map(|e| e["phase"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        phases,
+        ["preflight", "copy"],
+        "no volatile phase for a folder"
+    );
+    let copy = events
+        .iter()
+        .find(|e| e["event"] == "phase" && e["phase"] == "copy")
+        .unwrap();
+    let n = expected_hashes().len() as u64;
+    assert_eq!(copy["total"], n);
+    let artifacts: Vec<&serde_json::Value> = events
+        .iter()
+        .filter(|e| e["event"] == "artifact" && e["group"] != "volatile")
+        .collect();
+    assert_eq!(artifacts.len() as u64, n);
+    // Volatile data is not available from a folder source: reported as an artifact event too.
+    assert!(events.iter().any(|e| e["event"] == "artifact"
+        && e["group"] == "volatile"
+        && e["status"] == "not_collected"
+        && e["code"] == "NOT_AVAILABLE_FROM_SOURCE"));
+    assert!(artifacts.iter().all(|a| a["status"] == "collected"
+        && a["code"] == "COLLECTED_API"
+        && a["group"].is_string()
+        && a["source"].is_string()));
+    // Copy progress counts files (bytes_total 0); the verify pass after run_started counts bytes.
+    assert!(
+        events
+            .iter()
+            .any(|e| e["event"] == "progress" && e["bytes_total"] == 0 && e["total"] == n)
+    );
+    let started = events
+        .iter()
+        .position(|e| e["event"] == "run_started")
+        .unwrap();
     assert_eq!(events.last().unwrap()["event"], "run_finished");
+    assert!(
+        events[..started]
+            .iter()
+            .all(|e| e["event"] != "item_started")
+    );
     let elapsed: Vec<u64> = events
         .iter()
         .filter(|e| e["event"] == "progress")
@@ -326,42 +608,70 @@ fn jsonl_progress_is_one_event_per_line_with_elapsed_time() {
 }
 
 #[test]
-fn evidence_is_not_modified() {
-    let ev = tempfile::tempdir().unwrap();
-    let f = ev.path().join("a.bin");
-    std::fs::write(&f, b"evidence").unwrap();
-    let before = std::fs::metadata(&f).unwrap().modified().unwrap();
+fn groups_and_users_narrow_the_collection() {
     let out = tempfile::tempdir().unwrap();
+    let o = collect_sample(
+        out.path(),
+        &[
+            "--groups",
+            "browsers,tasks",
+            "--users",
+            "ben.test",
+            "--progress",
+            "none",
+        ],
+    );
+    assert_eq!(o.status.code(), Some(0));
+    let package = PathBuf::from(summary_value(&o.stdout, "package"));
+    let artifacts: Vec<String> = files_under(&package)
+        .into_iter()
+        .filter(|f| f.starts_with("artifacts/"))
+        .collect();
+    let want: Vec<String> = expected_hashes()
+        .into_keys()
+        .filter(|k| {
+            k.starts_with("artifacts/tasks/") || k.starts_with("artifacts/browsers/Users/ben.test/")
+        })
+        .collect();
+    assert_eq!(artifacts, want);
+    assert!(summary_value(&o.stdout, "collected").contains("not collected: 0"));
+}
+
+#[test]
+fn source_is_not_modified() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("volume");
+    for rel in files_under(&sample()) {
+        let to = src.join(&rel);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::copy(sample().join(&rel), &to).unwrap();
+    }
+    let state = |root: &Path| -> Vec<(String, Vec<u8>, std::time::SystemTime)> {
+        files_under(root)
+            .into_iter()
+            .map(|r| {
+                let p = root.join(&r);
+                let m = std::fs::metadata(&p).unwrap().modified().unwrap();
+                (r, std::fs::read(&p).unwrap(), m)
+            })
+            .collect()
+    };
+    let before = state(&src);
     bin()
-        .args(["scan", "-i"])
-        .arg(&f)
-        .args(["--progress", "none", "-o"])
-        .arg(out.path())
+        .args(["collect", "--progress", "none", "--source"])
+        .arg(&src)
+        .arg("-o")
+        .arg(tmp.path().join("out"))
         .assert()
         .code(0);
-    assert_eq!(std::fs::read(&f).unwrap(), b"evidence");
-    assert_eq!(std::fs::metadata(&f).unwrap().modified().unwrap(), before);
+    assert_eq!(state(&src), before);
 }
 
-#[test]
-fn executable_under_another_name_exits_3() {
-    let ev = tempfile::tempdir().unwrap();
-    std::fs::write(ev.path().join("invoice.pdf"), b"MZ\x90\x00\x03\x00\x00\x00").unwrap();
-    let out = tempfile::tempdir().unwrap();
-    bin()
-        .args(["scan", "-i"])
-        .arg(ev.path())
-        .args(["--progress", "none", "-o"])
-        .arg(out.path())
-        .assert()
-        .code(3);
-}
-
-/// examples/sample/run.sh compares the tool's hashes.csv with expected_hashes.csv and fails on a difference.
+/// examples/sample/run.sh compares the package manifest with expected_hashes.csv and fails on a difference.
 #[test]
 #[cfg(unix)]
-fn sample_script_compares_the_hash_register() {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/run.sh");
+fn sample_script_compares_the_manifest() {
+    let script = root().join("examples/sample/run.sh");
     let exe = env!("CARGO_BIN_EXE_rv-triage");
     let out = tempfile::tempdir().unwrap();
     let o = std::process::Command::new("sh")
@@ -374,10 +684,51 @@ fn sample_script_compares_the_hash_register() {
     let text = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{}", text);
     assert!(
-        text.contains("hashes.csv matches expected_hashes.csv (3 files"),
+        text.contains(&format!(
+            "manifest.csv matches expected_hashes.csv ({} files",
+            expected_hashes().len()
+        )),
         "{}",
         text
     );
+}
+
+/// The sample is small, synthetic and binary-safe: under 200 KB, marked binary for git.
+#[test]
+fn sample_source_is_small_and_marked_binary() {
+    let files = files_under(&sample());
+    let total: u64 = files
+        .iter()
+        .map(|f| std::fs::metadata(sample().join(f)).unwrap().len())
+        .sum();
+    assert!(total < 200 * 1024, "{} bytes", total);
+    let attrs = std::fs::read_to_string(root().join(".gitattributes")).unwrap();
+    assert!(
+        attrs
+            .lines()
+            .any(|l| l.trim() == "examples/sample/source/** binary")
+    );
+    for f in &files {
+        let b = std::fs::read(sample().join(f)).unwrap();
+        let s = String::from_utf8_lossy(&b);
+        let utf16: String =
+            char::decode_utf16(b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])))
+                .map(|c| c.unwrap_or('?'))
+                .collect();
+        assert!(
+            s.contains("RAKVOR SYNTHETIC SAMPLE") || utf16.contains("RAKVOR SYNTHETIC SAMPLE"),
+            "{} is not marked synthetic",
+            f
+        );
+    }
+}
+
+#[test]
+fn describe_role_is_collection() {
+    let o = bin().args(["describe", "--json"]).output().unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["role"], "collection");
+    assert_eq!(v["main_verb"], "collect");
 }
 
 #[test]
@@ -403,7 +754,7 @@ fn self_test_passes() {
 #[test]
 fn usage_doc_matches_help() {
     let generated = bin().arg("docs-cli").output().unwrap().stdout;
-    let doc = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/usage-cli.md");
+    let doc = root().join("docs/usage-cli.md");
     let committed = std::fs::read(&doc).unwrap_or_default();
     assert!(
         committed == generated,
@@ -488,7 +839,7 @@ fn trust_timestamp_signature_and_custody_with_test_pki() {
         .env_remove("RV_NO_TIMESTAMP")
         .env("NO_PROXY", "127.0.0.1")
         .env("RV_SIGN_PASSWORD", "test")
-        .args(["scan", "-i"])
+        .args(["collect", "--source"])
         .arg(sample())
         .args([
             "--jurisdiction",
@@ -663,7 +1014,7 @@ fn trust_timestamp_signature_and_custody_with_test_pki() {
     let out2 = tempfile::tempdir().unwrap();
     bin()
         .env_remove("RV_NO_TIMESTAMP")
-        .args(["scan", "-i"])
+        .args(["collect", "--source"])
         .arg(sample())
         .args([
             "--tsa-url",
@@ -693,69 +1044,30 @@ fn trust_timestamp_signature_and_custody_with_test_pki() {
     drop(tsa);
 }
 
-fn case_scan(case: &Path) -> Command {
-    let mut c = bin();
-    c.args(["scan", "--progress", "none", "--case-dir"])
-        .arg(case);
-    c
-}
-
-/// Analysis-role tools (CASE_ROLE flipped by the scaffold) need registered evidence first: an intake run made
-/// through the core with the role set explicitly. Intake tools register through their own CLI.
-fn seed_registry(case: &Path, case_id: &str) {
+/// A case-folder run made through the core (the reference input pipeline kept for the case machinery):
+/// `collect` hands its package to rv-hashinv instead of writing to a case folder, so the CLI has no case
+/// options; verify-case and verify-log must still check cases written by the other Rakvor tools.
+fn core_case_run(case: &Path, case_id: Option<&str>, role: CaseRole) -> Result<PathBuf, String> {
     let cfg = RunConfig {
-        inputs: vec![sample()],
+        inputs: vec![case_fixture()],
         algorithms: vec![HashAlgo::Sha256, HashAlgo::Md5],
         actor: "seed".into(),
-        case_id: Some(case_id.into()),
+        case_id: case_id.map(String::from),
         jurisdiction: "fr".into(),
         case_dir: Some(case.to_path_buf()),
-        case_role: CaseRole::Intake,
+        case_role: role,
         ..Default::default()
     };
-    run(&cfg, &mut |_| {}, &AtomicBool::new(false)).unwrap();
-}
-
-/// The run folder printed on the "logs:" line of the summary.
-fn run_folder(stdout: &[u8]) -> PathBuf {
-    let text = String::from_utf8_lossy(stdout);
-    let logs = text
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("logs:"))
-        .expect("logs line")
-        .trim();
-    PathBuf::from(logs).parent().unwrap().to_path_buf()
+    run(&cfg, &mut |_| {}, &AtomicBool::new(false))
+        .map(|s| s.log_dir.parent().unwrap().to_path_buf())
 }
 
 #[test]
-fn case_folder_intake_verify_case_and_tampering() {
+fn verify_case_and_verify_log_on_a_case_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let case = tmp.path().join("CASE-1");
-    let intake = CASE_ROLE == CaseRole::Intake;
-    if !intake {
-        seed_registry(&case, "CASE-1");
-    }
-    let out = case_scan(&case)
-        .args(["-i"])
-        .arg(sample())
-        .args([
-            "--case",
-            "CASE-1",
-            "--hash",
-            "sha256,md5",
-            "--jurisdiction",
-            "fr",
-        ])
-        .assert()
-        .code(0)
-        .stdout(predicate::str::contains(if intake {
-            "case:   CASE-1 (intake) registered 3 (new 3)"
-        } else {
-            "case:   CASE-1 (analysis) registered 0 (new 0), verified 3, mismatched 0"
-        }))
-        .get_output()
-        .stdout
-        .clone();
+    core_case_run(&case, Some("CASE-1"), CaseRole::Intake).unwrap();
+    let run_dir = core_case_run(&case, None, CASE_ROLE).unwrap();
     for f in [
         "case.json",
         "case-log.jsonl",
@@ -764,13 +1076,7 @@ fn case_folder_intake_verify_case_and_tampering() {
     ] {
         assert!(case.join(f).is_file(), "{}", f);
     }
-    assert!(!case.join("case-log.lock").exists(), "lock released");
-    let run_dir = run_folder(&out);
-    assert!(run_dir.starts_with(case.join("runs")));
-    assert!(
-        run_dir.join("logs/audit.jsonl").is_file()
-            && run_dir.join("reports/statistics.en.html").is_file()
-    );
+    assert!(run_dir.starts_with(case.join("runs").join(TOOL)));
     // verify-log of a run in a case: its end is anchored by run_finished in the case log.
     let run_logs = run_dir.join("logs");
     bin()
@@ -799,26 +1105,15 @@ fn case_folder_intake_verify_case_and_tampering() {
         .code(3)
         .stdout(predicate::str::contains("truncated: the case log records"));
     std::fs::write(&audit_path, &full).unwrap();
-    // Directory listing order differs between filesystems: look at every item's custody form.
-    let custody_ids: Vec<String> = std::fs::read_dir(run_dir.join("reports/items"))
-        .unwrap()
-        .map(|e| std::fs::read_to_string(e.unwrap().path().join("custody.fr.html")).unwrap())
-        .collect();
-    assert!(custody_ids.iter().any(|c| c.contains("E0001")));
-    let runs_before = if intake { 1 } else { 2 };
     bin().arg("verify-case").arg(&case).assert().code(0).stdout(
-        predicate::str::contains(format!("3 registered items, {} runs verified", runs_before)).and(
+        predicate::str::contains("3 registered items, 2 runs verified").and(
             predicate::str::is_match(r"outputs: [1-9]\d* verified of [1-9]\d* recorded").unwrap(),
         ),
     );
     // verify-case re-hashes every run's recorded outputs: an edited report is named, exit 3.
     let stats = run_dir.join("reports/statistics.json");
     let saved = std::fs::read(&stats).unwrap();
-    std::fs::write(
-        &stats, b"{}
-",
-    )
-    .unwrap();
+    std::fs::write(&stats, b"{}\n").unwrap();
     bin()
         .arg("verify-case")
         .arg(&case)
@@ -828,19 +1123,6 @@ fn case_folder_intake_verify_case_and_tampering() {
             "output reports/statistics.json: md5 differs from audit entry #",
         ));
     std::fs::write(&stats, saved).unwrap();
-    // The case id may be left out once the case exists; --evidence selects registered items.
-    case_scan(&case)
-        .args(["--evidence", "E0002"])
-        .assert()
-        .code(0)
-        .stdout(
-            predicate::str::contains("items: 1").and(predicate::str::contains(if intake {
-                "registered 1 (new 0)"
-            } else {
-                "verified 1"
-            })),
-        );
-    bin().arg("verify-case").arg(&case).assert().code(0);
     bin()
         .args(["verify-case", "--rehash"])
         .arg(&case)
@@ -849,26 +1131,9 @@ fn case_folder_intake_verify_case_and_tampering() {
         .stdout(predicate::str::contains(
             "re-hashed 3 of 3 registered items: 3 match the registry",
         ));
-
-    // Usage errors: another case's folder, unknown id, --evidence without --case-dir, creation without --case.
-    case_scan(&case).args(["--case", "OTHER"]).assert().code(2);
-    case_scan(&case)
-        .args(["--evidence", "E0099"])
-        .assert()
-        .code(2);
-    bin().args(["scan", "--evidence", "E0001"]).assert().code(2);
-    case_scan(&tmp.path().join("NEW"))
-        .arg("-i")
-        .arg(sample())
-        .assert()
-        .code(2);
-    let odd = tmp.path().join("ODD");
-    std::fs::create_dir_all(&odd).unwrap();
-    std::fs::write(odd.join("case.json"), r#"{"schema":"other/9"}"#).unwrap();
-    case_scan(&odd).arg("-i").arg(sample()).assert().code(2);
     bin().arg("verify-case").arg(tmp.path()).assert().code(1);
 
-    // A tampered case log: verify-case exit 3, and no tool extends the case.
+    // A tampered case log: verify-case exit 3, and no run extends the case.
     let log = case.join("case-log.jsonl");
     let original = std::fs::read_to_string(&log).unwrap();
     std::fs::write(&log, original.replacen("CASE-1", "CASE-X", 1)).unwrap();
@@ -884,7 +1149,7 @@ fn case_folder_intake_verify_case_and_tampering() {
             .count()
     };
     let before = runs(&case);
-    case_scan(&case).arg("-i").arg(sample()).assert().code(3);
+    assert!(core_case_run(&case, None, CASE_ROLE).is_err());
     assert_eq!(runs(&case), before, "no run folder in a broken case");
     std::fs::write(&log, &original).unwrap();
     // A tampered registry: detected through the digest recorded in the case log.
@@ -898,147 +1163,6 @@ fn case_folder_intake_verify_case_and_tampering() {
         .code(3)
         .stdout(predicate::str::contains("registry.json"));
 }
-
-/// The other profile of this tool (RV_CROSS_PROJECT = its project folder, with .forge.json): (command, cwd).
-fn other_profile() -> Option<(Vec<String>, PathBuf)> {
-    let dir = PathBuf::from(std::env::var("RV_CROSS_PROJECT").ok()?);
-    let forge: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join(".forge.json")).ok()?).ok()?;
-    if forge["profile"] == "python" {
-        let py = [".venv/bin/python", ".venv/Scripts/python.exe"]
-            .iter()
-            .map(|p| dir.join(p))
-            .find(|p| p.is_file())?;
-        let module = forge["module"].as_str()?.to_string();
-        Some((vec![py.display().to_string(), "-m".into(), module], dir))
-    } else {
-        let cmd = forge["cli_command"].as_array()?;
-        Some((
-            cmd.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect(),
-            dir,
-        ))
-    }
-}
-
-fn other(cmd: &(Vec<String>, PathBuf), args: &[&std::ffi::OsStr]) -> std::process::Output {
-    std::process::Command::new(&cmd.0[0])
-        .args(&cmd.0[1..])
-        .args(args)
-        .current_dir(&cmd.1)
-        .env("RV_NO_TIMESTAMP", "1")
-        .output()
-        .unwrap()
-}
-
-/// A case written by the other profile verifies here and the reverse (set RV_CROSS_PROJECT to run it).
-#[test]
-fn cross_language_case_verification() {
-    if CASE_ROLE != CaseRole::Intake {
-        eprintln!("skipping cross-language case test: it compares two intake reference profiles");
-        return;
-    }
-    let Some(cmd) = other_profile() else {
-        eprintln!(
-            "skipping cross-language case test: set RV_CROSS_PROJECT to the other profile's project"
-        );
-        return;
-    };
-    let tmp = tempfile::tempdir().unwrap();
-    let case = tmp.path().join("CASE-X");
-    let s = sample();
-    let o = other(
-        &cmd,
-        &[
-            "scan".as_ref(),
-            "-i".as_ref(),
-            s.as_os_str(),
-            "--progress".as_ref(),
-            "none".as_ref(),
-            "--case-dir".as_ref(),
-            case.as_os_str(),
-            "--case".as_ref(),
-            "CASE-X".as_ref(),
-        ],
-    );
-    assert!(
-        o.status.success(),
-        "other profile intake: {}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-    bin().arg("verify-case").arg(&case).assert().code(0);
-    // This profile extends the case written by the other one (same ids), and the other verifies it.
-    case_scan(&case)
-        .arg("-i")
-        .arg(sample())
-        .assert()
-        .code(0)
-        .stdout(predicate::str::contains("registered 3 (new 0)"));
-    let o = other(&cmd, &["verify-case".as_ref(), case.as_os_str()]);
-    assert!(
-        o.status.success(),
-        "other profile verify-case: {}",
-        String::from_utf8_lossy(&o.stdout)
-    );
-    let log = case.join("case-log.jsonl");
-    let text = std::fs::read_to_string(&log).unwrap();
-    std::fs::write(&log, text.replacen("\"seq\":2", "\"seq\":7", 1)).unwrap();
-    let o = other(&cmd, &["verify-case".as_ref(), case.as_os_str()]);
-    assert_eq!(o.status.code(), Some(3));
-
-    // Both profiles number the same folder identically (bytewise order of the normalised path).
-    let ev = tmp.path().join("order");
-    for f in [
-        "a/x.txt",
-        "a-b/x.txt",
-        "B.txt",
-        "a.txt",
-        "é.txt",
-        "z/w.txt",
-        "a b.txt",
-        "a_b.txt",
-    ] {
-        let p = ev.join(f);
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, f).unwrap();
-    }
-    let numbering = |out: &Path| -> Vec<(String, String)> {
-        let csv = std::fs::read_to_string(only_dir(&out.join("logs")).join("hashes.csv")).unwrap();
-        csv.lines()
-            .skip(1)
-            .map(|l| {
-                let mut f = l.splitn(3, ',');
-                (f.next().unwrap().to_string(), f.next().unwrap().to_string())
-            })
-            .collect()
-    };
-    let (mine, theirs) = (tmp.path().join("mine"), tmp.path().join("theirs"));
-    bin()
-        .args(["scan", "-r", "--progress", "none", "-i"])
-        .arg(&ev)
-        .arg("-o")
-        .arg(&mine)
-        .assert()
-        .code(0);
-    let o = other(
-        &cmd,
-        &[
-            "scan".as_ref(),
-            "-r".as_ref(),
-            "--progress".as_ref(),
-            "none".as_ref(),
-            "-i".as_ref(),
-            ev.as_os_str(),
-            "-o".as_ref(),
-            theirs.as_os_str(),
-        ],
-    );
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    assert_eq!(numbering(&mine), numbering(&theirs));
-    assert_eq!(numbering(&mine).len(), 8);
-}
-
 /// Cross-profile check without the other repository: a case folder written by the other profile
 /// (tests/golden/case-by-<profile>.zip.b64, made by tests/golden/regenerate.py) verifies here, and tampering with it is
 /// still detected. Unpacked with tests/golden/unpack.py (RV_TEST_PYTHON), like the other Python-based oracles.

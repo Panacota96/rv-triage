@@ -7,8 +7,8 @@ use std::path::Path;
 
 const TOOL: &str = "rv-triage";
 const TITLE: &str = "RV Triage";
-const ROLE: &str = "analysis";
-const MAIN_VERB: &str = "scan";
+const ROLE: &str = "collection";
+const MAIN_VERB: &str = "collect";
 const LOG_FORMATS: &[&str] = &["rakvor.audit/1"];
 
 fn root() -> &'static Path {
@@ -58,6 +58,11 @@ fn describe_prints_the_tool_contract() {
     assert_eq!(v["log_formats"], serde_json::json!(LOG_FORMATS));
     assert_eq!(v["cli_exe"], format!("{}.exe", TOOL));
     assert_eq!(v["gui_exe"], format!("{}-gui.exe", TOOL));
+    // A collection tool reads a live system, not evidence files: RV Hub never suggests it for a file.
+    assert_eq!(
+        v["accepts"],
+        serde_json::json!({"extensions": [], "signatures": []})
+    );
     // main_verb is a real command.
     Command::cargo_bin(TOOL)
         .unwrap()

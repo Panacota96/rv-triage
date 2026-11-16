@@ -139,13 +139,76 @@
       "title": "Le chemin enregistré contient désormais un autre contenu",
       "shows": "Ce chemin a déjà été enregistré comme %{previous_id} avec un autre contenu ; le contenu actuel reçoit un nouvel ID d'élément.",
       "does_not_prove": "Quelle version est l'originale ni pourquoi le contenu a changé."
+    },
+    "COLLECTED_RAW": {
+      "title": "Copié par lecture NTFS directe",
+      "shows": "Le fichier %{source} a été copié dans le paquet sous %{package} en lisant directement le volume NTFS, ce qui permet de lire les fichiers que Windows garde verrouillés.",
+      "does_not_prove": "Cela ne prouve pas que le fichier est complet sur le disque : les données encore dans le cache de Windows et non écrites ne sont pas incluses."
+    },
+    "COLLECTED_API": {
+      "title": "Copié avec l'interface de fichiers normale",
+      "shows": "Le fichier %{source} a été copié dans le paquet sous %{package} via l'interface de fichiers normale de Windows.",
+      "does_not_prove": "Cela ne prouve pas que la copie inclut des données que d'autres programmes n'avaient pas encore écrites, ni les métadonnées NTFS du fichier (dates $FILE_NAME)."
+    },
+    "NOT_COLLECTED_NO_ADMIN": {
+      "title": "Non collecté : pas de droits administrateur",
+      "shows": "%{source} n'a pas été collecté car l'outil ne s'exécutait pas en administrateur : %{error}.",
+      "does_not_prove": "Cela ne prouve pas que l'artefact manque ou a été caché ; relancez avec élévation pour le collecter."
+    },
+    "NOT_COLLECTED_LOCKED": {
+      "title": "Non collecté : fichier verrouillé",
+      "shows": "%{source} n'a pas été collecté car il était verrouillé et n'a pas pu être lu directement : %{error}.",
+      "does_not_prove": "Cela ne prouve pas que le fichier manque ni qu'il est protégé volontairement ; Windows verrouille ces fichiers en usage normal."
+    },
+    "NOT_COLLECTED_ERROR": {
+      "title": "Non collecté : erreur de lecture",
+      "shows": "%{source} n'a pas été collecté : %{error}.",
+      "does_not_prove": "Cela ne prouve pas que l'artefact a été altéré ; des droits d'accès, un support de sortie plein ou un disque endommagé peuvent en être la cause."
+    },
+    "CHANGED_DURING_COPY": {
+      "title": "Modifié pendant la copie",
+      "shows": "La source a changé pendant la copie (%{fields}) : taille avant %{size_before} octets, %{bytes_read} octets lus. Le paquet conserve les octets lus à ce moment.",
+      "does_not_prove": "Cela ne prouve pas une altération : les journaux d'événements et l'historique du navigateur sont écrits en continu sur un système en marche."
+    },
+    "PARTIAL_READ": {
+      "title": "Copié en partie seulement",
+      "shows": "La lecture s'est arrêtée sur une erreur à l'octet %{offset} sur %{size} : %{error}. Le paquet conserve les octets lus avant l'erreur.",
+      "does_not_prove": "Cela ne prouve pas que le reste du fichier a été supprimé ; un secteur défectueux ou un fichier en cours d'utilisation peuvent en être la cause."
+    },
+    "COPY_REREAD_MISMATCH": {
+      "title": "La copie du paquet diffère de ce qui a été lu",
+      "shows": "La copie du paquet, relue, a pour %{algorithm} %{reread}, mais les octets lus à la source avaient %{copied}.",
+      "does_not_prove": "Cela ne dit pas quel côté est erroné ; le support de sortie peut être défaillant. Collectez à nouveau sur un autre support."
+    },
+    "VOLATILE_PARTIAL": {
+      "title": "Données volatiles incomplètes",
+      "shows": "%{incomplete} entrées %{what} sur %{of} sont incomplètes : %{reason}.",
+      "does_not_prove": "Cela ne prouve pas que ces entrées ont été cachées volontairement ; les processus protégés refusent l'accès même aux administrateurs."
+    },
+    "OUTPUT_ON_SYSTEM_VOLUME": {
+      "title": "Paquet écrit sur le volume système",
+      "shows": "Le paquet a été écrit dans %{out}, sur le volume système %{volume} de la machine collectée, par choix explicite.",
+      "does_not_prove": "Cela ne prouve pas qu'une preuve a été écrasée, mais écrire à cet endroit peut écraser des données supprimées ; consignez pourquoi c'était nécessaire."
+    },
+    "NOT_AVAILABLE_FROM_SOURCE": {
+      "title": "Non disponible depuis cette source",
+      "shows": "Les données volatiles n'existent que sur un système en marche ; cette exécution a lu une source de type %{source}.",
+      "does_not_prove": "Cela ne dit rien du système dont proviennent l'image ou le dossier."
+    },
+    "CAPTURED_SNAPSHOT": {
+      "title": "Capturé depuis le système en marche",
+      "shows": "L'outil a écrit %{file} à partir de ce que le système en marche a déclaré (ce n'est pas la copie d'un fichier du volume).",
+      "does_not_prove": "Cela ne prouve pas que le système a tout déclaré : les processus protégés et les logiciels malveillants au niveau du noyau peuvent masquer des entrées."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "La détection du type repose sur une table limitée de signatures courantes ; les types inconnus sont signalés comme inconnus, non comme suspects.",
-    "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification proviennent du système de fichiers de la copie examinée et peuvent différer de la source d'origine.",
+    "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification sont celles qu'a enregistrées le système de fichiers source ($STANDARD_INFORMATION), lues au moment de la copie ; un logiciel peut les modifier et elles ne prouvent pas quand le contenu a été écrit.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un résultat sans constatation ne prouve pas qu'un fichier est authentique ni qu'il n'a pas été modifié avant son acquisition.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine.",
+    "EXECUTION_LEAVES_TRACES": "Exécuter un programme sur la machine laisse ses propres traces (prefetch, Amcache, les entrées du périphérique USB dans le registre) : elles sont attendues et ne doivent pas être lues comme une activité suspecte.",
+    "RAW_READ_COMMITTED_STATE": "Une lecture NTFS directe voit ce qui est écrit sur le disque à cet instant ; les données encore dans le cache de Windows, et les fichiers modifiés pendant la copie, peuvent différer de ce que montrera une image ultérieure.",
+    "NO_MEMORY_IMAGE": "Cette version n'acquiert pas la mémoire vive : les listes volatiles sont ce que Windows a déclaré, et un logiciel malveillant avec accès au noyau peut s'y cacher."
   },
   "brand": {
     "descriptor": "INVESTIGATION NUMÉRIQUE | RÉPONSE AUX INCIDENTS | SÉCURITÉ",
@@ -179,19 +242,10 @@
   "ui": {
     "window_title": "Rakvor",
     "audit_note": "Chaque action est inscrite dans un journal d'audit infalsifiable.",
-    "evidence": "1. Éléments de preuve",
-    "evidence_help": "Ajoutez un fichier, plusieurs fichiers ou des dossiers entiers (traitement en masse). Vous pouvez aussi les glisser dans cette fenêtre.",
-    "add_files": "Ajouter des fichiers…",
-    "add_folder": "Ajouter un dossier…",
-    "path_hint": "…ou saisissez / collez un chemin puis Entrée",
-    "add_path": "Ajouter le chemin",
-    "remove": "Retirer la sélection",
-    "no_evidence": "Aucun élément ajouté.",
-    "subfolders": "Inclure les sous-dossiers",
-    "hashes": "2. Algorithmes d'empreinte (1 ou 2)",
+    "hashes": "3. Algorithmes d'empreinte (1 ou 2)",
     "hash_tip_two": "Deux algorithmes sont déjà sélectionnés : décochez-en un d'abord.",
     "hash_tip_one": "Au moins un algorithme est requis.",
-    "reports": "3. Rapports",
+    "reports": "4. Paquet et rapports",
     "report_lang": "Langue des rapports",
     "ui_lang": "Langue de l'interface",
     "out_dir": "Dossier de sortie",
@@ -202,11 +256,11 @@
     "jurisdiction": "Fiche de possession",
     "jur_co": "Colombie (Fiscalía)",
     "jur_fr": "France (scellé)",
-    "trust": "4. Confiance",
+    "trust": "5. Confiance",
     "tsa": "Horodatage qualifié",
     "sign_cert": "Certificat de signature (.p12/.pfx)",
     "sign_pass": "Mot de passe du certificat",
-    "start": "Lancer l'analyse",
+    "start": "Lancer la collecte",
     "cancel": "Annuler",
     "cancelling": "Annulation : fin du fichier en cours, puis écriture des rapports partiels…",
     "files": "fichiers",
@@ -214,17 +268,65 @@
     "remaining": "Temps restant (estimation)",
     "now": "En cours",
     "done": "Terminé",
-    "cancelled": "Annulé — résultats partiels",
-    "failed": "L'analyse a échoué",
+    "cancelled": "Annulé — paquet partiel",
+    "failed": "La collecte a échoué",
     "errors": "erreurs",
     "findings": "constatations",
-    "open_report": "Ouvrir le rapport",
+    "open_report": "Ouvrir le rapport de statistiques",
     "open_logs": "Ouvrir le dossier des journaux",
     "warnings": "Avertissements",
     "lang_all": "Les trois (EN + ES + FR)",
-    "case_dir": "Dossier de l'affaire",
-    "case_dir_hint": "facultatif : dossier partagé de l'affaire (relie les outils d'une même affaire)",
-    "out_from_case": "Dossier de sortie : fixé par le dossier de l'affaire",
-    "evidence_ids": "ID des éléments"
+    "elevated_ok": "Administrateur : les fichiers verrouillés sont lus directement sur le volume NTFS",
+    "elevated_no": "Pas de droits d'administrateur : les ruches système, les journaux d'événements et les fichiers des autres utilisateurs seront listés comme non collectés",
+    "restart_admin": "Relancer en administrateur",
+    "restart_admin_tip": "Ouvre l'invite administrateur de Windows, puis ferme cette fenêtre. Les réglages choisis ici ne sont pas repris.",
+    "restart_failed": "Impossible de relancer en administrateur",
+    "source": "1. Source",
+    "source_help": "Le système en cours d'exécution est lu sur place. Une image de volume (.dd, .img, .raw) ou un dossier organisé comme un volume Windows est lu de la même façon.",
+    "source_live": "Système en direct",
+    "source_image": "Fichier image de volume…",
+    "source_folder": "Dossier…",
+    "source_path_hint": "chemin du fichier image ou du dossier",
+    "choose": "Choisir…",
+    "groups": "2. Éléments à collecter",
+    "group_volatile": "Données volatiles",
+    "group_evtx": "Journaux d'événements",
+    "group_hives": "Ruches du registre",
+    "group_prefetch": "Prefetch",
+    "group_browsers": "Historique des navigateurs",
+    "group_tasks": "Tâches planifiées",
+    "volatile_help": "Processus, connexions réseau, sessions et services du système en cours d'exécution.",
+    "volatile_only_live": "Les données volatiles n'existent que sur le système en direct : elles ne sont pas collectées depuis une image ou un dossier.",
+    "users": "Utilisateurs",
+    "users_hint": "facultatif : noms des dossiers de profil séparés par des virgules (vide = tous les utilisateurs)",
+    "out_hint": "obligatoire : un support amovible ou un disque de l'enquêteur",
+    "allow_same_volume": "Autoriser l'écriture sur le volume système",
+    "allow_same_volume_warn": "Écrire le paquet sur le volume système de la machine examinée peut écraser des données supprimées et modifie le volume. À n'utiliser que si aucun autre disque n'est disponible ; le rapport le consigne.",
+    "err_out_dir": "Choisissez d'abord un dossier de sortie.",
+    "err_source_path": "Choisissez le fichier image ou le dossier à lire.",
+    "err_groups": "Sélectionnez au moins un groupe à collecter.",
+    "err_running": "Une collecte est déjà en cours.",
+    "err_image_missing": "Fichier image introuvable",
+    "err_folder_missing": "Dossier introuvable",
+    "step": "Étape",
+    "step_preflight": "Vérification du système et du dossier de sortie",
+    "step_volatile": "Capture des données volatiles",
+    "step_copy": "Copie des fichiers",
+    "step_verify": "Relecture du paquet",
+    "read": "lus",
+    "results": "Résultats",
+    "col_group": "Groupe",
+    "col_source": "Chemin source",
+    "col_status": "État",
+    "col_finding": "Constat",
+    "status_collected": "Collecté",
+    "status_not_collected": "Non collecté",
+    "not_collected_only": "Non collectés uniquement",
+    "no_results": "Aucun résultat pour l'instant.",
+    "results_note": "Les constats sont des signaux sur la façon dont chaque copie a été faite, pas des conclusions sur le système.",
+    "collected_count": "collectés",
+    "not_collected_count": "non collectés",
+    "open_package": "Ouvrir le dossier du paquet",
+    "register_hint": "Étape suivante : enregistrez le dossier du paquet avec rv-hashinv pour que chaque fichier reçoive un identifiant de pièce dans l'affaire."
   }
 }

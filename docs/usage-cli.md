@@ -4,15 +4,15 @@
 
 ```mermaid
 flowchart LR
-  A[rv-triage] --> B[scan]
+  A[rv-triage] --> B[collect]
   A --> C[verify-log]
   A --> D[self-test]
   A --> T[timestamp]
   A --> V[verify-case]
   T --> E
   B --> E[(logs/RUN-ID)]
-  B --> F[(reports/RUN-ID)]
-  B -. --case-dir .-> K[(CASE folder)]
+  B --> F[(reports/RUN-ID/package)]
+  F -. rv-hashinv .-> K[(CASE folder)]
   V --> K
   C --> E
 ```
@@ -21,24 +21,27 @@ flowchart LR
 
 ```text
 DESCRIPTION:
-  rv-triage reviews a single file, a whole folder (bulk) or a list of files. For every file it:
-    1. opens the file read-only and hashes it in one pass with one or two algorithms;
-    2. detects the real file type from its signature (magic bytes);
-    3. flags empty files, extensions that do not match the content, programs hidden under
-       another name and duplicated content;
-    4. writes a technical report and a customer-friendly summary (HTML, PDF and JSON).
-  Each run also writes a statistics report and an audit trail under <OUT>/logs/<RUN-ID>/.
-  Every action is appended to a hash-chained log that `rv-triage verify-log` can check later.
-
-  CASE FOLDER (--case-dir): Rakvor tools share one folder per case. rv-triage is the intake tool: it
-  registers every hashed file in evidence/registry.json (evidence ids E0001, E0002, ...) so later
-  tools
-  can prove they examined bit-identical copies. `rv-triage verify-case <CASE>` checks it all.
+  rv-triage runs from a USB stick on a live Windows 10/11 machine and collects, into one package:
+    1. preflight: checks elevation and that the output folder is not on the system volume of the
+       machine being collected; records the host (name, OS, time, system drive);
+    2. volatile data first, because it changes fastest: processes, network connections, logon
+       sessions and services (volatile/*.json);
+    3. files of each group: registry hives (system and per user), event logs, prefetch, browser
+       history (Edge, Chrome, Firefox) and scheduled tasks. Each file is read once: the bytes are
+       hashed with one or two algorithms while they are written to the package, and the file is
+       stat'ed before and after (CHANGED_DURING_COPY if it moved);
+    4. writes manifest.csv and manifest.json, then re-reads every packaged file and compares it
+       with the digests taken during the copy (COPY_REREAD_MISMATCH);
+    5. writes the statistics report, one technical report, summary and custody form per packaged
+       file, and a hash-chained audit log that `rv-triage verify-log` checks later.
+  A file that cannot be read (locked, no administrator rights, error) is listed as not collected,
+  with the reason; the run continues. The examiner then registers the package in the lab with
+  rv-hashinv (case folder, evidence ids).
 
 Usage: rv-triage <COMMAND>
 
 Commands:
-  scan         Hash, check and report on a file, a folder or a list of files
+  collect      Collect volatile data and Windows artifacts into a hashed, audit-logged package
   verify-log   Verify an audit log (audit.jsonl): edited, deleted or re-ordered entries, and
                truncation
   self-test    Check every hash algorithm against known-answer test vectors
@@ -56,88 +59,98 @@ Options:
 Run `rv-triage <COMMAND> --help` for the options, examples and exit codes of each command.
 ```
 
-## rv-triage scan
+## rv-triage collect
 
 ```text
 DESCRIPTION:
-  rv-triage reviews a single file, a whole folder (bulk) or a list of files. For every file it:
-    1. opens the file read-only and hashes it in one pass with one or two algorithms;
-    2. detects the real file type from its signature (magic bytes);
-    3. flags empty files, extensions that do not match the content, programs hidden under
-       another name and duplicated content;
-    4. writes a technical report and a customer-friendly summary (HTML, PDF and JSON).
-  Each run also writes a statistics report and an audit trail under <OUT>/logs/<RUN-ID>/.
-  Every action is appended to a hash-chained log that `rv-triage verify-log` can check later.
+  rv-triage runs from a USB stick on a live Windows 10/11 machine and collects, into one package:
+    1. preflight: checks elevation and that the output folder is not on the system volume of the
+       machine being collected; records the host (name, OS, time, system drive);
+    2. volatile data first, because it changes fastest: processes, network connections, logon
+       sessions and services (volatile/*.json);
+    3. files of each group: registry hives (system and per user), event logs, prefetch, browser
+       history (Edge, Chrome, Firefox) and scheduled tasks. Each file is read once: the bytes are
+       hashed with one or two algorithms while they are written to the package, and the file is
+       stat'ed before and after (CHANGED_DURING_COPY if it moved);
+    4. writes manifest.csv and manifest.json, then re-reads every packaged file and compares it
+       with the digests taken during the copy (COPY_REREAD_MISMATCH);
+    5. writes the statistics report, one technical report, summary and custody form per packaged
+       file, and a hash-chained audit log that `rv-triage verify-log` checks later.
+  A file that cannot be read (locked, no administrator rights, error) is listed as not collected,
+  with the reason; the run continues. The examiner then registers the package in the lab with
+  rv-hashinv (case folder, evidence ids).
 
-  CASE FOLDER (--case-dir): Rakvor tools share one folder per case. rv-triage is the intake tool: it
-  registers every hashed file in evidence/registry.json (evidence ids E0001, E0002, ...) so later
-  tools
-  can prove they examined bit-identical copies. `rv-triage verify-case <CASE>` checks it all.
-
-Usage: rv-triage scan [OPTIONS]
+Usage: rv-triage collect [OPTIONS]
 
 Options:
-  -i, --input <PATH>
-          File or folder to review. Repeat for several.
-          
-          Folders are reviewed one level deep unless --recursive is given. Symbolic links are not
-          followed.
-          Default: none (required unless --input-list, --case-dir or --evidence is given).
-          Example: --input D:\evidence --input E:\phone-export\chat.txt
+  -o, --out <DIR>
+          Folder where logs/ and reports/ (with the package) are created. Created if missing.
+          Required: choose the USB or network drive; the system volume of the machine being
+          collected is refused unless --allow-same-volume.
+          Default: none (required)
+          Example: --out E:\triage
 
-  -L, --input-list <FILE>
-          Text file with one path per line (bulk review). Lines starting with # are ignored.
-          
-          Relative paths are resolved from the list file's folder.
-          Default: none. Example: --input-list case-014-files.txt
+  -s, --source <SRC>
+          What to collect from: live (the running Windows system), a raw NTFS volume image
+          file (.dd, .img, .raw) or a folder laid out like a volume root (a mounted image, a
+          test set). Volatile data exists only for live.
+          Default: live
+          Example: --source D:\images\laptop-c.dd   or   --source examples\sample\source
 
-  -r, --recursive
-          Also review files in subfolders.
-          
-          Default: off (only the first level of each folder). Example: -i D:\evidence --recursive
+  -g, --groups <LIST>
+          Artifact groups, comma-separated: volatile, evtx, hives, prefetch, browsers, tasks,
+          or all.
+          Default: all
+          Example: --groups volatile,evtx,hives
+
+  -u, --users <NAMES>
+          Only these user profiles (folder names under Users\), comma-separated or repeated.
+          Applies to the per-user hives and the browser history.
+          Default: every profile
+          Example: --users ana.ruiz,ben.test
+
+      --allow-same-volume
+          Accept an output folder on the system volume of the machine being collected (live
+          source). Writing there can overwrite deleted data: the run gets the high finding
+          OUTPUT_ON_SYSTEM_VOLUME (exit code 3).
+          Default: off (refused, exit code 1)
+          Example: --allow-same-volume
 
   -H, --hash <ALGO>
           Hash algorithm(s): one or two of md5, sha1, sha256, sha512, sha3-256, blake3.
-          
-          Both are computed in the same read of each file. More than two is refused (exit code 2).
-          Default: sha256. Example: --hash sha256,md5   or   --hash sha256 --hash blake3
-
-  -o, --out <DIR>
-          Folder where logs/ and reports/ are created. Created if missing. Ignored with --case-dir.
-          
-          Default: ./rakvor-out. Example: --out E:\case-014\rv-triage
+          Both are computed in the same read of each file. More than two is refused (exit 2).
+          Default: sha256
+          Example: --hash sha256,md5   or   --hash sha256 --hash blake3
 
   -l, --lang <LANG>
           Report language: en, es, fr, or all (one HTML and PDF per language). JSON is
           language-neutral.
-          
-          Default: en. Example: --lang es   or   --lang all
+          Default: en
+          Example: --lang es   or   --lang all
 
   -a, --actor <NAME>
           Name of the examiner, written in every audit entry and report.
-          
-          Default: the operating-system user name. Example: --actor "Ana Ruiz"
+          Default: the operating-system user name
+          Example: --actor "Ana Ruiz"
 
   -c, --case <ID>
-          Case or engagement identifier printed on the reports. With --case-dir it names the case
-          when the folder is created, and must match case.json afterwards (it can be left out).
-          Default: none. Example: --case CASE-2026-014
+          Case or engagement identifier printed on the reports.
+          Default: none
+          Example: --case CASE-2026-014
 
   -p, --progress <MODE>
           How progress is shown: bar, jsonl or none.
-          
-          Default: bar (hidden automatically when stderr is not a terminal).
+          Default: bar (hidden automatically when stderr is not a terminal)
           Example: --progress jsonl
 
           Possible values:
-          - bar:   Progress bar with elapsed time, throughput and ETA on stderr
+          - bar:   Progress bar with elapsed time, files or bytes done and ETA on stderr
           - jsonl: One JSON event per line on stdout (for scripts and other tools)
           - none:  No progress output; only the final summary
 
   -j, --jurisdiction <CC>
           Chain-of-custody form per item: co (Colombia, Fiscalía style, Spanish) or fr (France,
-          scellés, French).
-          An English copy is always added. With --case-dir the case's jurisdiction applies.
+          scellés, French). An English copy is always added.
           Default: co
           Example: --jurisdiction fr
 
@@ -147,108 +160,88 @@ Options:
           Example: --tsa-url https://freetsa.org/tsr
 
       --no-timestamp
-          Do not request a trusted timestamp (offline labs). Also set by RV_NO_TIMESTAMP=1.
+          Do not request a trusted timestamp (offline). Also set by RV_NO_TIMESTAMP=1.
           Default: off (a timestamp is requested)
           Example: --no-timestamp
 
       --sign-cert <P12>
-          Examiner's certificate (.p12/.pfx, RSA) used to sign every PDF report. The password is
-          read from
-          the environment variable named by --sign-pass-env, or asked for interactively.
+          Examiner's certificate (.p12/.pfx, RSA) used to sign every PDF report. The password
+          is read from the environment variable named by --sign-pass-env, or asked for
+          interactively.
           Default: none (PDFs are not signed)
-          Example: --sign-cert C:\certs\ana-ruiz.p12
+          Example: --sign-cert E:\certs\ana-ruiz.p12
 
       --sign-pass-env <VAR>
           Environment variable holding the certificate password.
           Default: RV_SIGN_PASSWORD
           Example: --sign-pass-env CERT_PASS
 
-      --case-dir <DIR>
-          Shared case folder that links the Rakvor tools of one case (created with --case if
-          missing).
-          Outputs go to <DIR>/runs/rv-triage/<RUN-ID>/; every hashed file is registered in
-          <DIR>/evidence/registry.json; the run is recorded in <DIR>/case-log.jsonl.
-          With no --input, every registered item is examined again.
-          Default: none (standalone run in --out)
-          Example: --case-dir E:\CASE-014 --case CASE-014
-
-  -E, --evidence <IDS>
-          Registered evidence ids to examine (needs --case-dir), comma-separated or repeated.
-          Default: none (the --input files, or every registered item)
-          Example: --evidence E0001,E0007
-
   -h, --help
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  Review one file (SHA-256, English reports):
-    rv-triage scan --input evidence/contract.pdf
-  Review a folder and its subfolders with SHA-256 + MD5, Spanish reports, for case CASE-2026-014:
-    rv-triage scan -i D:\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014
-  Review the files listed in a text file, reports in the three languages, machine-readable progress:
-    rv-triage scan --input-list files.txt --lang all --progress jsonl > events.jsonl
-  Verify the audit log afterwards:
-    rv-triage verify-log rakvor-out/logs/<RUN-ID>/audit.jsonl
-  Open a case folder and register the evidence (intake), then verify the whole case:
-    rv-triage scan -i D:\evidence -r --case-dir E:\CASE-014 --case CASE-014 --jurisdiction fr
-    rv-triage verify-case E:\CASE-014
-  Re-examine two registered items of the case:
-    rv-triage scan --case-dir E:\CASE-014 --evidence E0001,E0002
+  Collect everything from the running system onto the USB drive E: (run as administrator):
+    rv-triage collect --out E:\triage --case CASE-2026-014 --actor "Ana Ruiz"
+  Only event logs and registry hives, SHA-256 + MD5, Spanish reports, one user profile:
+    rv-triage collect -o E:\triage --groups evtx,hives --users ana.ruiz --hash sha256,md5 --lang es
+  Rehearse on a mounted image or a test folder, reports in three languages, JSON events:
+    rv-triage collect -s D:\mounted-c -o E:\triage --lang all --progress jsonl > events.jsonl
+  Verify the audit log and every packaged file afterwards:
+    rv-triage verify-log E:\triage\logs\<RUN-ID>
+  In the lab, register the package in the case folder:
+    rv-hashinv scan -i E:\triage\reports\<RUN-ID>\package -r --case-dir F:\CASE-014
 
 EXIT CODES:
-  0    Completed; no high-severity finding.
-  1    Runtime error (input not found, output not writable, case log locked, ...).
-       See the audit log.
-  2    Usage error (unknown option, more than two hash algorithms, unsupported language).
-       With --case-dir: folder of another case or schema, --case missing when creating the
-       case, unknown evidence id.
-  3    Completed with at least one high-severity finding (e.g. unreadable file, program under
-       another name, evidence that differs from the case registry), or the case folder fails
-       verification (nothing is written to it).
-  130  Cancelled with Ctrl+C. Partial reports and the cancellation are written to the audit log.
+  0    Completed; no high-severity finding (files not collected for lack of rights or locks
+       are medium or low findings, listed in the reports).
+  1    Runtime error (--source not found or not readable, output not writable, output on the
+       system volume without --allow-same-volume). See the audit log when one was created.
+  2    Usage error (--out missing, unknown option or group, more than two hash algorithms,
+       unsupported language).
+  3    Completed with at least one high-severity finding: a file read only in part
+       (PARTIAL_READ), a packaged copy that differs from what was read (COPY_REREAD_MISMATCH),
+       or the package written on the system volume (OUTPUT_ON_SYSTEM_VOLUME).
+  130  Cancelled with Ctrl+C. Partial package, reports and the cancellation are in the audit log.
 
 FILES WRITTEN:
-  <OUT>/logs/<RUN-ID>/audit.jsonl         Hash-chained log of every action (one JSON object per
-  line).
+  <OUT>/reports/<RUN-ID>/package/         The package to hand over to the lab:
+    volatile/system.json                  Collection host, source, options, elevation.
+    volatile/<NAME>.json                  Processes, connections, sessions, services (live only).
+    artifacts/<GROUP>/<PATH ON VOLUME>    Each copied file at its path on the volume, e.g.
+                                          artifacts/hives/Windows/System32/config/SAM.
+    manifest.csv                          One row per packaged file: path, group, source,
+                                          method (raw|api|snapshot), bytes, digests, findings.
+    manifest.json                         The same, plus every file not collected and why.
+  <OUT>/logs/<RUN-ID>/audit.jsonl         Hash-chained log of every action (JSON Lines).
   <OUT>/logs/<RUN-ID>/audit.log           The same actions, human-readable.
-  <OUT>/logs/<RUN-ID>/hashes.csv          Hash register: index, path, size, digests, status.
-  <OUT>/logs/<RUN-ID>/environment.json    Tool and dependency versions, OS, host, user, command
-  line.
-  <OUT>/reports/<RUN-ID>/statistics.json  Run statistics (+ statistics.<LANG>.html and .pdf).
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/technical.json|.<LANG>.html|.<LANG>.pdf   Technical
-  review.
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/summary.json|.<LANG>.html|.<LANG>.pdf     Customer
-  summary.
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/custody.json|.<es|fr>.html|.pdf|.en.html|.pdf  Custody
-  form.
+  <OUT>/logs/<RUN-ID>/hashes.csv          Hash register of the packaged files (re-read).
+  <OUT>/logs/<RUN-ID>/environment.json    Tool and dependency versions, OS, host, user, command.
   <OUT>/logs/<RUN-ID>/timestamp-<SEQ>.tsr|.json  RFC 3161 token for the audit chain head.
-  With --case-dir <CASE>, logs/ and reports/ go to <CASE>/runs/rv-triage/<RUN-ID>/, plus:
-  <CASE>/case.json                        Case id, jurisdiction, creation (written once).
-  <CASE>/case-log.jsonl                   Hash-chained case log of every tool: case_created,
-                                          run_started, evidence_registered, run_finished.
-  <CASE>/evidence/registry.json|.csv      Evidence registry: E0001..., path, size, hashes.
+  <OUT>/reports/<RUN-ID>/statistics.json  Run statistics (+ statistics.<LANG>.html and .pdf).
+  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/technical|summary.json|.<LANG>.html|.<LANG>.pdf
+  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/custody.json|.<es|fr>.html|.pdf|.en.html|.pdf
 
 FORENSIC NOTES:
-  - Evidence is opened read-only and never modified; modification times are compared before and
-  after.
-  - Work on a verified copy (write-blocked image or export), not on original media.
+  - Run from removable media (USB or network drive) and write the package there: --out on the
+    system volume of the machine being collected is refused (it can overwrite deleted data)
+    unless --allow-same-volume, which adds the high finding OUTPUT_ON_SYSTEM_VOLUME.
+  - Elevated (Run as administrator): files are read from the raw NTFS volume, so locked hives
+    and event logs are collected (method raw). Not elevated: the normal file API is used; locked
+    files and other users' profiles are listed as NOT_COLLECTED_NO_ADMIN and the run continues.
+  - Running the tool leaves its own traces on the machine: a prefetch file for rv-triage.exe,
+    Amcache / ShimCache entries, USB device entries (USBSTOR, setupapi.dev.log) and event log
+    records. Note the time of the run so they can be told apart from the user's activity.
+  - No RAM image is taken: volatile/*.json is what the Windows APIs report, not a memory dump.
+    Capture memory with a dedicated tool first if it matters.
+  - Every packaged file is hashed while it is read and re-read from the package afterwards; the
+    source is opened read-only. A finding says how a copy was made, never what it means.
   - Each audit entry stores the SHA-256 of the previous one; editing, deleting or re-ordering any
-    line is detected by `verify-log`. Removing the last lines is detected only against a record
-    kept outside the log: the RFC 3161 timestamp or, with --case-dir, the case log. Keep the log
-    folder with the reports.
-  - A file without findings is not proven authentic; read the Limitations section of each report.
-  - MD5 and SHA-1 are accepted for compatibility with older case files; pair them with SHA-256 or
-  BLAKE3.
-  - The chain head is timestamped by an RFC 3161 authority (proves when the log existed). Offline?
-  The run
-    finishes with `timestamp_pending`; run `rv-triage timestamp <LOG>` later.
+    line is detected by `verify-log`, which also re-hashes every packaged file. Removing the
+    last lines is detected only against the RFC 3161 timestamp: keep the log with the package.
+  - MD5 and SHA-1 are accepted for compatibility; pair them with SHA-256 or BLAKE3.
+  - Offline? The run finishes with `timestamp_pending`; run `rv-triage timestamp <LOG>` later.
   - With --sign-cert every PDF is signed with the examiner's certificate; the password is never
-  logged.
-  - Case folder: every tool re-verifies case-log.jsonl and the registry digest before
-    writing, and refuses a broken case (exit 3). Appends happen under case-log.lock; a lock
-    older than 10 minutes is reported as stale and never deleted automatically.
-  - Each run's audit.jsonl records case_linked (the case-log entry it started from); the case
-    log records the run's final audit head, so the two chains vouch for each other.
+    logged.
 ```
 
 ## rv-triage verify-log
@@ -295,8 +288,9 @@ CHECKS:
     recorded at run_finished (only timestamp_obtained may follow). Entries after the last
     anchored one are listed as not provable; with neither record the output says
     "truncation not detectable without a timestamp or case record";
-  - recorded outputs: every file the log says the run wrote (item reports, statistics,
-    hashes.csv, environment.json) is re-hashed with each algorithm recorded and compared; the
+  - recorded outputs: every file the log says the run wrote (package files and manifests,
+    item reports, statistics, hashes.csv, environment.json) is re-hashed with each algorithm
+    recorded and compared; the
     latest entry for a file wins. A missing, edited or replaced file is a problem; a recorded
     path that is absolute, contains .. or resolves outside the run folder (symlink, junction)
     is rejected and not read. Timestamp tokens (checked above) and files written outside the
@@ -311,8 +305,8 @@ EXAMPLES:
 
 EXIT CODES:
   0  The chain is intact and agrees with its timestamps and case record (if any), and every
-     output file it records (reports, hashes.csv, environment.json) still has the recorded
-     digests.
+     output file it records (package, reports, hashes.csv, environment.json) still has the
+     recorded digests.
   1  The log or the --tsa-ca file cannot be read.
   3  The chain is broken (an entry was edited, deleted or re-ordered), a timestamp does not
      match or does not verify (altered token, invalid TSA signature, chain not trusted by
@@ -442,10 +436,10 @@ Options:
 
 DESCRIPTION:
   Prints what this tool is, what it accepts and how to launch it, validated by
-  schemas/describe.schema.json. RV Hub reads it to list the tool, start its GUI on a case
-  folder (rv-triage-gui.exe --case-dir <CASE> [FILES...]) and suggest the tool for a file.
-  Fields: schema, tool, title, version, role (intake), main_verb (scan), accepts
-  (extensions and signatures; "*" = any file), case_formats, log_formats, cli_exe,
+  schemas/describe.schema.json. RV Hub reads it to list the tool and start it.
+  Fields: schema, tool, title, version, role (collection: it reads a live system, an image
+  or a folder, and its package is registered later with rv-hashinv), main_verb (collect),
+  accepts (empty: no evidence file is an input), case_formats, log_formats, cli_exe,
   gui_exe, exit_codes. Nothing is read or written; no audit log is created.
 
 EXAMPLES:

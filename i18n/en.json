@@ -139,13 +139,76 @@
       "title": "Registered path now holds different content",
       "shows": "This path was registered earlier as %{previous_id} with other content; the current content gets a new evidence ID.",
       "does_not_prove": "Which version is the original or why the content changed."
+    },
+    "COLLECTED_RAW": {
+      "title": "Copied by raw NTFS read",
+      "shows": "The file %{source} was copied into the package as %{package} by reading the NTFS volume directly, so files Windows keeps locked could be read.",
+      "does_not_prove": "It does not show that the file is complete on disk: data still in the Windows cache and not yet written is not included."
+    },
+    "COLLECTED_API": {
+      "title": "Copied with the normal file API",
+      "shows": "The file %{source} was copied into the package as %{package} through the normal Windows file interface.",
+      "does_not_prove": "It does not show that the copy includes data other programs had not yet written, nor the file's NTFS metadata ($FILE_NAME times)."
+    },
+    "NOT_COLLECTED_NO_ADMIN": {
+      "title": "Not collected: no administrator rights",
+      "shows": "%{source} was not collected because the tool did not run as administrator: %{error}.",
+      "does_not_prove": "It does not show that the artifact is missing or was hidden; run again elevated to collect it."
+    },
+    "NOT_COLLECTED_LOCKED": {
+      "title": "Not collected: file locked",
+      "shows": "%{source} was not collected because it was locked and could not be read raw: %{error}.",
+      "does_not_prove": "It does not show that the file is missing or protected on purpose; Windows locks these files in normal use."
+    },
+    "NOT_COLLECTED_ERROR": {
+      "title": "Not collected: read error",
+      "shows": "%{source} was not collected: %{error}.",
+      "does_not_prove": "It does not show that the artifact was tampered with; permissions, a full output drive or a damaged disk can cause this."
+    },
+    "CHANGED_DURING_COPY": {
+      "title": "Changed while it was copied",
+      "shows": "The source changed during the copy (%{fields}): size before %{size_before} bytes, %{bytes_read} bytes read. The package holds the bytes read at that moment.",
+      "does_not_prove": "It does not show tampering: event logs and browser history are written to continuously on a running system."
+    },
+    "PARTIAL_READ": {
+      "title": "Copied only in part",
+      "shows": "Reading stopped with an error at byte %{offset} of %{size}: %{error}. The package keeps the bytes read before the error.",
+      "does_not_prove": "It does not show that the rest of the file was deleted; a damaged sector or a file in use can cause it."
+    },
+    "COPY_REREAD_MISMATCH": {
+      "title": "Packaged copy differs from what was read",
+      "shows": "The packaged copy, read back, has %{algorithm} %{reread}, but the bytes read from the source had %{copied}.",
+      "does_not_prove": "It does not show which side is wrong; the output drive may be faulty. Collect again to another drive."
+    },
+    "VOLATILE_PARTIAL": {
+      "title": "Volatile data incomplete",
+      "shows": "%{incomplete} of %{of} %{what} entries are incomplete: %{reason}.",
+      "does_not_prove": "It does not show that those entries were hidden on purpose; protected processes refuse access even to administrators."
+    },
+    "OUTPUT_ON_SYSTEM_VOLUME": {
+      "title": "Package written on the system volume",
+      "shows": "The package was written to %{out}, on the system volume %{volume} of the machine being collected, by explicit choice.",
+      "does_not_prove": "It does not show that evidence was overwritten, but writing there can overwrite deleted data; record why it was necessary."
+    },
+    "NOT_AVAILABLE_FROM_SOURCE": {
+      "title": "Not available from this source",
+      "shows": "Volatile data exists only on a running system; this run read a %{source} source.",
+      "does_not_prove": "It does not show anything about the system that the image or folder came from."
+    },
+    "CAPTURED_SNAPSHOT": {
+      "title": "Captured from the running system",
+      "shows": "The tool wrote %{file} from what the running system reported (it is not a copy of a file on the volume).",
+      "does_not_prove": "It does not show that the system reported everything: protected processes and kernel-level malware can hide entries."
     }
   },
   "limitations": {
     "SIGNATURE_TABLE_LIMITED": "Type detection uses a limited table of common file signatures; unknown types are reported as unknown, not as suspicious.",
-    "TIMESTAMPS_FROM_FILESYSTEM": "Modification times come from the file system of the examined copy and may differ from the original source.",
+    "TIMESTAMPS_FROM_FILESYSTEM": "Modification times are those the source file system recorded ($STANDARD_INFORMATION), read at the time of the copy; they can be changed by software and are not proof of when content was written.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "A result without findings does not prove that a file is authentic or unaltered before acquisition.",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that the examined copy matches the original source."
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY": "A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that the examined copy matches the original source.",
+    "EXECUTION_LEAVES_TRACES": "Running any program on the machine leaves traces of its own (prefetch, Amcache, the USB device entries in the registry): they are expected and must not be read as suspect activity.",
+    "RAW_READ_COMMITTED_STATE": "A raw NTFS read sees what is written on disk at that moment; data still in the Windows cache, and files changing during the copy, may differ from what a later image shows.",
+    "NO_MEMORY_IMAGE": "This version does not image RAM: the volatile lists are what Windows reported, which malware with kernel access can hide from."
   },
   "brand": {
     "descriptor": "FORENSICS | INCIDENT RESPONSE | SECURITY",
@@ -179,19 +242,10 @@
   "ui": {
     "window_title": "Rakvor",
     "audit_note": "Every action is written to a tamper-evident audit log.",
-    "evidence": "1. Evidence",
-    "evidence_help": "Add one file, several files or whole folders (bulk review). You can also drag them onto this window.",
-    "add_files": "Add files…",
-    "add_folder": "Add folder…",
-    "path_hint": "…or type / paste a path and press Enter",
-    "add_path": "Add path",
-    "remove": "Remove selected",
-    "no_evidence": "No evidence added yet.",
-    "subfolders": "Include subfolders",
-    "hashes": "2. Hash algorithms (choose 1 or 2)",
+    "hashes": "3. Hash algorithms (choose 1 or 2)",
     "hash_tip_two": "Two algorithms are already selected: untick one first.",
     "hash_tip_one": "At least one algorithm is required.",
-    "reports": "3. Reports",
+    "reports": "4. Package and reports",
     "report_lang": "Report language",
     "ui_lang": "Interface language",
     "out_dir": "Output folder",
@@ -202,11 +256,11 @@
     "jurisdiction": "Custody form",
     "jur_co": "Colombia (Fiscalía)",
     "jur_fr": "France (scellé)",
-    "trust": "4. Trust",
+    "trust": "5. Trust",
     "tsa": "Trusted timestamp",
     "sign_cert": "Signing certificate (.p12/.pfx)",
     "sign_pass": "Certificate password",
-    "start": "Start review",
+    "start": "Start collection",
     "cancel": "Cancel",
     "cancelling": "Cancelling: finishing the current file, then writing partial reports…",
     "files": "files",
@@ -214,17 +268,65 @@
     "remaining": "Remaining (estimate)",
     "now": "Now",
     "done": "Done",
-    "cancelled": "Cancelled — partial results",
-    "failed": "The review failed",
+    "cancelled": "Cancelled — partial package",
+    "failed": "The collection failed",
     "errors": "errors",
     "findings": "findings",
-    "open_report": "Open report",
+    "open_report": "Open statistics report",
     "open_logs": "Open log folder",
     "warnings": "Warnings",
     "lang_all": "All three (EN + ES + FR)",
-    "case_dir": "Case folder",
-    "case_dir_hint": "optional: shared case folder (links the tools of one case)",
-    "out_from_case": "Output folder: set by the case folder",
-    "evidence_ids": "Evidence IDs"
+    "elevated_ok": "Administrator: locked files are read directly from the NTFS volume",
+    "elevated_no": "Not running as administrator: system hives, event logs and other users' files will be listed as not collected",
+    "restart_admin": "Restart as administrator",
+    "restart_admin_tip": "Opens the Windows administrator prompt, then this window closes. Settings chosen here are not carried over.",
+    "restart_failed": "Could not restart as administrator",
+    "source": "1. Source",
+    "source_help": "The live system is read in place. A volume image (.dd, .img, .raw) or a folder laid out like a Windows volume is read the same way.",
+    "source_live": "Live system",
+    "source_image": "Volume image file…",
+    "source_folder": "Folder…",
+    "source_path_hint": "path of the image file or folder",
+    "choose": "Choose…",
+    "groups": "2. What to collect",
+    "group_volatile": "Volatile data",
+    "group_evtx": "Event logs",
+    "group_hives": "Registry hives",
+    "group_prefetch": "Prefetch",
+    "group_browsers": "Browser history",
+    "group_tasks": "Scheduled tasks",
+    "volatile_help": "Processes, network connections, sessions and services of the running system.",
+    "volatile_only_live": "Volatile data exists only on the live system: not collected from an image or a folder.",
+    "users": "Users",
+    "users_hint": "optional: profile folder names, comma separated (empty = every user)",
+    "out_hint": "required: a removable or examiner drive",
+    "allow_same_volume": "Allow writing on the system volume",
+    "allow_same_volume_warn": "Writing the package on the system volume of the machine being collected can overwrite deleted data and alters the volume. Use it only when no other drive is available; the report records it.",
+    "err_out_dir": "Choose an output folder first.",
+    "err_source_path": "Choose the image file or folder to read.",
+    "err_groups": "Select at least one group to collect.",
+    "err_running": "A collection is already running.",
+    "err_image_missing": "Image file not found",
+    "err_folder_missing": "Folder not found",
+    "step": "Step",
+    "step_preflight": "Checking the system and the output folder",
+    "step_volatile": "Capturing volatile data",
+    "step_copy": "Copying files",
+    "step_verify": "Re-reading the package",
+    "read": "read",
+    "results": "Results",
+    "col_group": "Group",
+    "col_source": "Source path",
+    "col_status": "Status",
+    "col_finding": "Finding",
+    "status_collected": "Collected",
+    "status_not_collected": "Not collected",
+    "not_collected_only": "Not collected only",
+    "no_results": "Nothing reported yet.",
+    "results_note": "Findings are signals about how each copy was made, not conclusions about the system.",
+    "collected_count": "collected",
+    "not_collected_count": "not collected",
+    "open_package": "Open package folder",
+    "register_hint": "Next step: register the package folder with rv-hashinv so that every file gets an evidence ID in the case."
   }
 }
