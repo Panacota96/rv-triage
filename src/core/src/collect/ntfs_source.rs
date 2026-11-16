@@ -212,6 +212,7 @@ struct LiveRaw {
 }
 
 /// The API error when it carries an OS error code (locked / denied classification), else both messages.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn both(raw: io::Error, api: io::Error) -> io::Error {
     if api.raw_os_error().is_some() {
         api
