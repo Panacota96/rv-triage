@@ -82,13 +82,12 @@ fn unsupported(path: &str, why: &str) -> io::Error {
     )
 }
 
-/// UTC RFC 3339 to the second, the same style as `crate::time::utc_from`.
+/// UTC RFC 3339 with the full 100-ns NTFS resolution (`crate::collect::fs_time`).
 pub fn nt_time(t: NtfsTime) -> Option<String> {
     let ts = t.nt_timestamp();
     let secs = (ts / 10_000_000) as i64 - 11_644_473_600;
     let nanos = ((ts % 10_000_000) * 100) as u32;
-    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos)
-        .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos).map(crate::collect::fs_time)
 }
 
 /// Runs a parser call, turning a panic in the parser (corrupt or changing metadata) into an error instead of

@@ -129,10 +129,22 @@ fn stat_reports_times_record_and_size() {
     let m = s.stat("Windows/System32/config/SYSTEM").unwrap();
     assert_eq!(m.size, 12 * 1024);
     assert!(m.mft_record.unwrap() >= 24);
-    assert_eq!(m.si_created.as_deref(), Some("2026-01-02T03:04:05Z"));
-    assert_eq!(m.si_modified.as_deref(), Some("2026-01-03T03:04:05Z"));
-    assert_eq!(m.si_mft_changed.as_deref(), Some("2026-01-04T03:04:05Z"));
-    assert_eq!(m.si_accessed.as_deref(), Some("2026-01-05T03:04:05Z"));
+    assert_eq!(
+        m.si_created.as_deref(),
+        Some("2026-01-02T03:04:05.0000000Z")
+    );
+    assert_eq!(
+        m.si_modified.as_deref(),
+        Some("2026-01-03T03:04:05.0000000Z")
+    );
+    assert_eq!(
+        m.si_mft_changed.as_deref(),
+        Some("2026-01-04T03:04:05.0000000Z")
+    );
+    assert_eq!(
+        m.si_accessed.as_deref(),
+        Some("2026-01-05T03:04:05.0000000Z")
+    );
     for t in [
         &m.fn_created,
         &m.fn_modified,
@@ -140,7 +152,7 @@ fn stat_reports_times_record_and_size() {
         &m.fn_accessed,
     ] {
         let t = t.as_deref().unwrap();
-        assert!(t.len() == 20 && t.ends_with('Z'), "{}", t);
+        assert!(t.len() == 28 && t.ends_with('Z'), "{}", t);
     }
     assert!(!m.sparse && !m.compressed && !m.encrypted);
     assert_eq!(s.stat("Windows/System32/config/SYSTEM").unwrap(), m);
@@ -501,16 +513,16 @@ fn raw_device_path_reads_with_aligned_io_only() {
 }
 
 #[test]
-fn nt_times_format_like_the_rest_of_the_tool() {
+fn nt_times_keep_the_100ns_resolution() {
     assert_eq!(
         volume::nt_time(ntfs::NtfsTime::from(0u64)).as_deref(),
-        Some("1601-01-01T00:00:00Z")
+        Some("1601-01-01T00:00:00.0000000Z")
     );
-    // 2026-01-02T03:04:05.9999999Z: fractions are dropped, as crate::time::utc_from does.
+    // 2026-01-02T03:04:05.9999999Z: the full 100-ns NTFS resolution is kept (change detection).
     let t = (1_767_323_045u64 + 11_644_473_600) * 10_000_000 + 9_999_999;
     assert_eq!(
         volume::nt_time(ntfs::NtfsTime::from(t)).as_deref(),
-        Some("2026-01-02T03:04:05Z")
+        Some("2026-01-02T03:04:05.9999999Z")
     );
 }
 

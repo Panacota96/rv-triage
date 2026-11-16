@@ -277,6 +277,20 @@ pub fn run(
             cfg.jurisdiction
         ));
     }
+    // A live collection must not write anything (not even the log folder) on the system volume of the machine
+    // being collected unless the examiner allowed it: refuse before the first file is created.
+    if let Some(opts) = &cfg.collect
+        && opts.source == crate::collect::SourceSpec::Live
+        && !opts.allow_same_volume
+    {
+        let drive = crate::collect::host::system_drive();
+        if crate::collect::host::same_volume(&cfg.out_dir, &drive) {
+            return Err(crate::collect::phase::same_volume_refusal(
+                &cfg.out_dir,
+                &drive,
+            ));
+        }
+    }
     let run_id = new_run_id();
     let Some(case_dir) = &cfg.case_dir else {
         let log_dir = cfg.out_dir.join("logs").join(&run_id);
@@ -1212,6 +1226,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tech["audit"]["first_seq"], seq);
+    }
+
+    /// The refusal happens before anything is written: not even the log folder exists afterwards.
+    #[cfg(windows)]
+    #[test]
+    fn live_collection_on_the_system_volume_writes_nothing() {
+        let drive = crate::collect::host::system_drive();
+        let tmp = tempfile::tempdir().unwrap();
+        if !crate::collect::host::same_volume(tmp.path(), &drive) {
+            return; // temp folder not on the system volume on this machine
+        }
+        let out = tmp.path().join("out");
+        let mut c = cfg(PathBuf::new(), out.clone());
+        c.collect = Some(crate::collect::CollectOptions::default());
+        let e = run(&c, &mut |_| {}, &AtomicBool::new(false)).unwrap_err();
+        assert!(e.contains("system volume"), "{}", e);
+        assert!(!out.exists());
     }
 
     #[test]

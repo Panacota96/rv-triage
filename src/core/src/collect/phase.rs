@@ -156,6 +156,17 @@ fn write_manifest(
     .map_err(|e| format!("audit log write failed: {}", e))
 }
 
+/// Why a live collection refuses an output folder on the system volume (`run` refuses before writing anything;
+/// the phase repeats the check and records it).
+pub fn same_volume_refusal(out_dir: &Path, drive: &str) -> String {
+    format!(
+        "the output folder {} is on the system volume {} of the machine being collected: writing there \
+         can overwrite deleted data. Use a USB or network drive, or --allow-same-volume to accept it",
+        out_dir.display(),
+        drive
+    )
+}
+
 /// Runs the collection phase. `Err` = the run cannot start (refused output volume, source that does not open);
 /// the reason is already in the audit log as `run_failed`.
 #[allow(clippy::too_many_arguments)]
@@ -199,15 +210,7 @@ pub fn collect_phase(
         )
         .map_err(io)?;
         if same && !opts.allow_same_volume {
-            return fail(
-                log,
-                format!(
-                    "the output folder {} is on the system volume {} of the machine being collected: writing there \
-                     can overwrite deleted data. Use a USB or network drive, or --allow-same-volume to accept it",
-                    out_dir.display(),
-                    facts.system_drive
-                ),
-            );
+            return fail(log, same_volume_refusal(out_dir, &facts.system_drive));
         }
         if same {
             run_findings.push(
@@ -302,6 +305,12 @@ pub fn collect_phase(
                     .with("source", opts.source.kind()),
             };
             r.not_collected_seq.push(record_not_collected(log, &n)?);
+            sink(&Event::Artifact {
+                group: n.group.name().into(),
+                source: n.source_display.clone(),
+                status: "not_collected".into(),
+                code: n.finding.code.clone(),
+            });
             r.not_collected.push(n);
         }
     }
@@ -331,6 +340,12 @@ pub fn collect_phase(
                     finding: not_collected_finding(error, raw_os_error, &message, elevated, live),
                 };
                 r.not_collected_seq.push(record_not_collected(log, &n)?);
+                sink(&Event::Artifact {
+                    group: n.group.name().into(),
+                    source: n.source_display.clone(),
+                    status: "not_collected".into(),
+                    code: n.finding.code.clone(),
+                });
                 r.not_collected.push(n);
             }
         }

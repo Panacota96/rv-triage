@@ -69,7 +69,7 @@ impl DirectorySource {
 }
 
 fn utc(t: io::Result<std::time::SystemTime>) -> Option<String> {
-    t.ok().map(crate::time::utc_from)
+    t.ok().map(|t| super::fs_time(t.into()))
 }
 
 impl Source for DirectorySource {

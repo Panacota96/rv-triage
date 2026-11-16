@@ -244,8 +244,9 @@ NTFS keeps two sets of four times (created, modified, MFT record changed, access
 | `$FILE_NAME` (`fn_*`) | the file system, mainly on create, rename, move | not through the normal API | raw sources only (live elevated, image); the long-name (`Win32`) entry is used, not the 8.3 alias |
 
 Times are FILETIME values (100 ns intervals since 1601-01-01 UTC), converted as
-`unix_seconds = ⌊t / 10 000 000⌋ − 11 644 473 600` and written as RFC 3339 UTC **to the second**
-(`2026-01-03T03:04:05Z`, `volume.rs` `nt_time`). A difference between `si_created` and `fn_created`, or `si_*`
+`unix_seconds = ⌊t / 10 000 000⌋ − 11 644 473 600` and written as RFC 3339 UTC with the full **100 ns**
+resolution (`2026-01-03T03:04:05.1234567Z`, `collect::fs_time`), so a write within the same second still shows
+as `CHANGED_DURING_COPY`. The directory source writes the times the file API returns in the same format. A difference between `si_created` and `fn_created`, or `si_*`
 earlier than `fn_*`, is a classic indicator of manipulated times — for the examiner to assess, not a finding of
 this tool. The access time is **not** compared before/after the copy (reading may update it).
 

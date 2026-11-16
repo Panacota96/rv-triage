@@ -319,6 +319,16 @@ pub fn open_source(spec: &SourceSpec, elevated: bool) -> Result<Box<dyn Source>,
     }
 }
 
+/// A file-system time as UTC RFC 3339 with 100-ns precision (`2026-11-15T10:00:00.1234567Z`), the resolution
+/// NTFS stores: change detection before/after a copy must not miss a write within the same second.
+pub fn fs_time(t: chrono::DateTime<chrono::Utc>) -> String {
+    format!(
+        "{}.{:07}Z",
+        t.format("%Y-%m-%dT%H:%M:%S"),
+        t.timestamp_subsec_nanos() / 100
+    )
+}
+
 /// `C:\Windows\x` style display of a volume path under `prefix` (`C:`, `image.dd:`, a folder).
 pub fn display_path(prefix: &str, volume_path: &str) -> String {
     let sep = if prefix.ends_with(':') || prefix.contains('\\') || !prefix.contains('/') {
@@ -359,6 +369,23 @@ mod tests {
         assert_eq!(f.code, codes::NOT_COLLECTED_ERROR);
         let f = not_collected_finding(PermissionDenied, None, "x", false, false);
         assert_eq!(f.code, codes::NOT_COLLECTED_ERROR);
+    }
+
+    #[test]
+    fn file_system_times_keep_100ns_precision() {
+        let t =
+            chrono::DateTime::<chrono::Utc>::from_timestamp(1_763_200_000, 123_456_700).unwrap();
+        assert_eq!(fs_time(t), "2025-11-15T09:46:40.1234567Z");
+        let a = FileMeta {
+            si_modified: Some(fs_time(t)),
+            ..Default::default()
+        };
+        let later = t + chrono::Duration::milliseconds(200);
+        let b = FileMeta {
+            si_modified: Some(fs_time(later)),
+            ..Default::default()
+        };
+        assert_eq!(a.changed_fields(&b), vec!["si_modified"]);
     }
 
     #[test]

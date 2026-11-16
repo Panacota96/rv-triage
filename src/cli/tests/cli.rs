@@ -566,9 +566,16 @@ fn jsonl_progress_reports_phases_artifacts_and_elapsed_time() {
         .unwrap();
     let n = expected_hashes().len() as u64;
     assert_eq!(copy["total"], n);
-    let artifacts: Vec<&serde_json::Value> =
-        events.iter().filter(|e| e["event"] == "artifact").collect();
+    let artifacts: Vec<&serde_json::Value> = events
+        .iter()
+        .filter(|e| e["event"] == "artifact" && e["group"] != "volatile")
+        .collect();
     assert_eq!(artifacts.len() as u64, n);
+    // Volatile data is not available from a folder source: reported as an artifact event too.
+    assert!(events.iter().any(|e| e["event"] == "artifact"
+        && e["group"] == "volatile"
+        && e["status"] == "not_collected"
+        && e["code"] == "NOT_AVAILABLE_FROM_SOURCE"));
     assert!(artifacts.iter().all(|a| a["status"] == "collected"
         && a["code"] == "COLLECTED_API"
         && a["group"].is_string()
