@@ -550,7 +550,7 @@ Gaps specific to this tool's domain (live collection and the raw NTFS reader):
 | G26 | Sample scripts checking the tool's output — **closed**: `run.sh` and `run.ps1` compare `package/manifest.csv` (size, SHA-256, MD5) with `expected_hashes.csv` and fail on any difference; kept for numbering | — | — | — | — |
 | G27 | No memory image; volatile lists come from Windows APIs that kernel-level malware can falsify | ISO-11, LR-3 | Capture RAM with a dedicated tool before RV Triage when it matters; limitation `NO_MEMORY_IMAGE` | — (out of scope for v0.1) | Examiner |
 | G28 | NTFS-compressed, EFS-encrypted and reparse-point data are refused by the raw reader; alternate data streams are not collected. On a live elevated run the file API is used for such a file (method `api`), on an image it is not collected | ISO-4, LR-4 | Listed per file (`NOT_COLLECTED_ERROR` with the reason, or method `api` in the manifest) | LZNT1 decompression; ADS collection | Eng. |
-| G29 | The package is verifiable against the collection's audit log only with the original `logs/` + `reports/` layout; the rv-hashinv intake is not cryptographically linked to the collection log | CO-P2, ISO-1 | Copy the whole output folder; run `verify-log` before intake; compare rv-hashinv's digests with `manifest.csv` | Record the collection's audit head in the intake run (rv-hashinv) | Eng. |
+| G29 | The package is verifiable against the collection's audit log only with the original `logs/` + `reports/` layout | CO-P2, ISO-1 | Copy the whole output folder | **Remedied for the intake link** by rv-hashinv ≥ 0.5: it verifies the collection log, records its final audit head (`collection_linked`) and flags any file that differs from the collected digest; a package copied without `logs/` is still registered but flagged `COLLECTION_LOG_UNVERIFIED` | Eng. |
 <!-- /forge:domain -->
 
 ## Examiner checklist before filing a report
@@ -612,8 +612,10 @@ G10):
 21. **Every `PARTIAL_READ`, `COPY_REREAD_MISMATCH`, `NOT_COLLECTED_LOCKED` or `NOT_COLLECTED_ERROR`** relied on or
     relevant was explained; `CHANGED_DURING_COPY` on files relied on was considered (the package holds the bytes read
     at that moment).
-22. **Hand-off**: `verify-log` on the whole output folder printed `outputs: N verified of N recorded` before the
-    rv-hashinv intake, and rv-hashinv's digests equal `manifest.csv` (G29).
+22. **Hand-off**: the rv-hashinv intake run has a `collection_linked` entry with `verification: intact` and no
+    `COLLECTION_DIGEST_MISMATCH` / `COLLECTION_LOG_UNVERIFIED` finding (G29); with an rv-hashinv older than 0.5,
+    `verify-log` on the whole output folder printed `outputs: N verified of N recorded` and rv-hashinv's digests
+    equal `manifest.csv`.
 <!-- /forge:domain -->
 
 ## Sources

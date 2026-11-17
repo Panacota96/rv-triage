@@ -80,7 +80,12 @@ fn csv_field(s: &str) -> String {
 }
 
 /// `manifest.csv`: one row per packaged file; `manifest.json`: packaged and not-collected entries.
-fn manifests(r: &PhaseResult, algos: &[HashAlgo], source: &Value) -> (Vec<u8>, Vec<u8>) {
+fn manifests(
+    r: &PhaseResult,
+    algos: &[HashAlgo],
+    source: &Value,
+    run_id: &str,
+) -> (Vec<u8>, Vec<u8>) {
     let mut csv = format!(
         "package_path,group,source,method,bytes,{},truncated_at,findings\n",
         algos.iter().map(|a| a.name()).collect::<Vec<_>>().join(",")
@@ -116,6 +121,12 @@ fn manifests(r: &PhaseResult, algos: &[HashAlgo], source: &Value) -> (Vec<u8>, V
     }
     let json = json!({
         "format": "rakvor.triage-manifest/1",
+        // Which collection this package is: rv-hashinv finds its audit log at <OUT>/logs/<run_id>/audit.jsonl
+        // and links the intake to it (also named here for a package copied without that layout).
+        "tool": crate::TOOL_NAME,
+        "version": crate::TOOL_VERSION,
+        "run_id": run_id,
+        "collected_utc": crate::time::utc_now(),
         "source": source,
         "algorithms": algos,
         "collected": r.collected.iter().map(|c| json!({
@@ -433,7 +444,11 @@ pub fn collect_phase(
         });
     }
 
-    let (csv, js) = manifests(&r, algos, &described);
+    let run_id = report_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (csv, js) = manifests(&r, algos, &described, &run_id);
     write_manifest(log, &package_dir, "manifest.csv", &csv, algos)?;
     write_manifest(log, &package_dir, "manifest.json", &js, algos)?;
     log.record(

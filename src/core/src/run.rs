@@ -1156,6 +1156,12 @@ mod tests {
         for f in ["manifest.csv", "manifest.json", "volatile/system.json"] {
             assert!(pkg.join(f).exists(), "{}", f);
         }
+        // The manifest names the collection, so rv-hashinv can link an intake to this run's audit log.
+        let m: Value =
+            serde_json::from_str(&std::fs::read_to_string(pkg.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(m["run_id"], s.run_id.as_str());
+        assert_eq!(m["tool"], "rv-triage");
         let csv = std::fs::read_to_string(s.log_dir.join("hashes.csv")).unwrap();
         assert_eq!(csv.lines().count(), 10, "{}", csv); // header + 9 packaged files, not the volatile entry
         let v = crate::verify::verify_log(&s.log_dir.join("audit.jsonl")).unwrap();
