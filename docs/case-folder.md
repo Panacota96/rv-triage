@@ -59,9 +59,15 @@ rv-hashinv scan -i F:\incoming\triage2\reports\<RUN-ID>\package -r --case-dir F:
 ```
 
 rv-hashinv hashes every file of the package again, gives each one an evidence id in
-`<CASE>/evidence/registry.json` and writes its own run under `<CASE>/runs/rv-hashinv/<RUN-ID>/`. Compare its
-digests with the collection's `manifest.csv` (same algorithm): they must be equal. The case-folder layout,
-events and `verify-case` are documented in rv-hashinv's `docs/case-folder.md`.
+`<CASE>/evidence/registry.json` and writes its own run under `<CASE>/runs/rv-hashinv/<RUN-ID>/`. From rv-hashinv
+0.5 on, the intake recognises the package (`manifest.json`, format `rakvor.triage-manifest/1`, which names this
+tool, its version and the collection's run id), verifies this collection's audit log like `verify-log` does, and
+records the collection's **final audit entry and head** in a `collection_linked` entry of its own audit log. Every
+registered file is compared with the digest recorded here: a difference is `COLLECTION_DIGEST_MISMATCH` (high), a
+missing or broken collection log `COLLECTION_LOG_UNVERIFIED` (medium). Give rv-hashinv the package **inside the
+whole output folder** (`<OUT>/reports/<RUN-ID>/package`, with `<OUT>/logs/<RUN-ID>` next to it), or the link cannot
+be made. With an older rv-hashinv, compare its digests with `manifest.csv` by hand. The case-folder layout, events
+and `verify-case` are documented in rv-hashinv's `docs/case-folder.md`.
 
 Keep the collection's `logs/<RUN-ID>` and `reports/<RUN-ID>` (statistics, item reports, custody forms) with the
 case file: they show how the package was made, which rv-hashinv cannot.
