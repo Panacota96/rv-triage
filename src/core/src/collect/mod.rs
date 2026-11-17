@@ -21,6 +21,9 @@ pub mod source;
 pub mod targets;
 pub mod volatile;
 
+#[cfg(test)]
+mod golden_time;
+
 use crate::analyzer::{Finding, Severity};
 use serde::Serialize;
 use std::path::PathBuf;

@@ -390,20 +390,38 @@ pub(super) mod windows_impl {
         format!("UTC{}{:02}:{:02}", sign, off.abs() / 60, off.abs() % 60)
     }
 
-    pub fn facts() -> SystemFacts {
-        let now = chrono::Utc::now();
-        // SAFETY: GetTickCount64 has no preconditions.
-        let up_ms = unsafe { GetTickCount64() };
+    /// (boot time, local time, UTC time) texts of the instant `now`, `up_ms` after the boot, at a zone `bias`
+    /// (minutes west of UTC, Win32 sign): `2026-11-15T09:46:40Z`, `2026-11-15T10:46:40.123+01:00`,
+    /// `2026-11-15T09:46:40.123Z`.
+    pub(crate) fn clock_texts(
+        now: std::time::SystemTime,
+        up_ms: u64,
+        bias: i32,
+    ) -> (Option<String>, String, String) {
+        let now: chrono::DateTime<chrono::Utc> = now.into();
         // Milliseconds since the kernel started (sleep included; with Fast Startup, since the last full boot).
         let boot_utc = i64::try_from(up_ms)
             .ok()
             .and_then(|ms| now.checked_sub_signed(chrono::Duration::milliseconds(ms)))
             .map(|b| b.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+        let offset = chrono::FixedOffset::east_opt(-bias * 60).unwrap_or_else(|| chrono::Utc.fix());
+        (
+            boot_utc,
+            now.with_timezone(&offset)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
+            now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        )
+    }
+
+    pub fn facts() -> SystemFacts {
+        let now = std::time::SystemTime::now();
+        // SAFETY: GetTickCount64 has no preconditions.
+        let up_ms = unsafe { GetTickCount64() };
         let (key, bias) = time_zone().unwrap_or_else(|| {
             let off = chrono::Local::now().offset().local_minus_utc() / 60;
             (String::new(), -off)
         });
-        let offset = chrono::FixedOffset::east_opt(-bias * 60).unwrap_or_else(|| chrono::Utc.fix());
+        let (boot_utc, local_time, utc_time) = clock_texts(now, up_ms, bias);
         let offset_text = utc_offset_text(bias);
         let time_zone = if key.is_empty() {
             offset_text
@@ -417,10 +435,8 @@ pub(super) mod windows_impl {
             os_build,
             boot_utc,
             time_zone,
-            local_time: now
-                .with_timezone(&offset)
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
-            utc_time: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            local_time,
+            utc_time,
             account: account().unwrap_or_else(crate::env::os_user),
             elevated: is_elevated(),
             system_drive: system_drive(),

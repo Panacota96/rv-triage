@@ -68,7 +68,7 @@ impl DirectorySource {
     }
 }
 
-fn utc(t: io::Result<std::time::SystemTime>) -> Option<String> {
+pub(crate) fn utc(t: io::Result<std::time::SystemTime>) -> Option<String> {
     t.ok().map(|t| super::fs_time(t.into()))
 }
 
