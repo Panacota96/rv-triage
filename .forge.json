@@ -14,5 +14,6 @@
     "-p",
     "rv-triage-cli",
     "--"
-  ]
+  ],
+  "input_mode": "collection"
 }
