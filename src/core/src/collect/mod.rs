@@ -322,14 +322,59 @@ pub fn open_source(spec: &SourceSpec, elevated: bool) -> Result<Box<dyn Source>,
     }
 }
 
+/// -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z: the calendar range every time text has always covered.
+const MIN_UNIX: i64 = -8_334_601_228_800;
+const MAX_UNIX: i64 = 8_210_266_876_799;
+
+/// `YYYY-MM-DDTHH:MM:SS` (UTC, proleptic Gregorian; the year is signed outside 0000-9999, `+60056`) of a Unix
+/// second; None outside +/-262 143 years. Plain arithmetic: NTFS times run to the year 60056, past jiff's 9999.
+pub(crate) fn utc_seconds(secs: i64) -> Option<String> {
+    if !(MIN_UNIX..=MAX_UNIX).contains(&secs) {
+        return None;
+    }
+    let (days, sod) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // H. Hinnant's civil_from_days
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let year = if (0..=9999).contains(&y) {
+        format!("{y:04}")
+    } else {
+        format!("{}{:04}", if y < 0 { '-' } else { '+' }, y.unsigned_abs())
+    };
+    Some(format!(
+        "{year}-{m:02}-{d:02}T{:02}:{:02}:{:02}",
+        sod / 3600,
+        sod % 3600 / 60,
+        sod % 60
+    ))
+}
+
+/// Whole seconds since the Unix epoch (floored) and the nanoseconds past them.
+pub(crate) fn unix_parts(t: std::time::SystemTime) -> (i64, u32) {
+    match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => (d.as_secs() as i64, d.subsec_nanos()),
+        Err(e) => {
+            let d = e.duration();
+            match d.subsec_nanos() {
+                0 => (-(d.as_secs() as i64), 0),
+                n => (-(d.as_secs() as i64) - 1, 1_000_000_000 - n),
+            }
+        }
+    }
+}
+
 /// A file-system time as UTC RFC 3339 with 100-ns precision (`2026-11-15T10:00:00.1234567Z`), the resolution
 /// NTFS stores: change detection before/after a copy must not miss a write within the same second.
-pub fn fs_time(t: chrono::DateTime<chrono::Utc>) -> String {
-    format!(
-        "{}.{:07}Z",
-        t.format("%Y-%m-%dT%H:%M:%S"),
-        t.timestamp_subsec_nanos() / 100
-    )
+/// `secs` since the Unix epoch (floored) and `nanos` (< 10^9) past it; None outside +/-262 143 years.
+pub fn fs_time(secs: i64, nanos: u32) -> Option<String> {
+    utc_seconds(secs).map(|s| format!("{s}.{:07}Z", nanos / 100))
 }
 
 /// `C:\Windows\x` style display of a volume path under `prefix` (`C:`, `image.dd:`, a folder).
@@ -376,16 +421,14 @@ mod tests {
 
     #[test]
     fn file_system_times_keep_100ns_precision() {
-        let t =
-            chrono::DateTime::<chrono::Utc>::from_timestamp(1_763_200_000, 123_456_700).unwrap();
-        assert_eq!(fs_time(t), "2025-11-15T09:46:40.1234567Z");
+        let t = fs_time(1_763_200_000, 123_456_700);
+        assert_eq!(t.as_deref(), Some("2025-11-15T09:46:40.1234567Z"));
         let a = FileMeta {
-            si_modified: Some(fs_time(t)),
+            si_modified: t,
             ..Default::default()
         };
-        let later = t + chrono::Duration::milliseconds(200);
         let b = FileMeta {
-            si_modified: Some(fs_time(later)),
+            si_modified: fs_time(1_763_200_000, 323_456_700),
             ..Default::default()
         };
         assert_eq!(a.changed_fields(&b), vec!["si_modified"]);
