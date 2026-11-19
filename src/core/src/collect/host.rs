@@ -69,14 +69,14 @@ pub fn facts() -> SystemFacts {
 
 #[allow(dead_code)]
 fn portable_facts() -> SystemFacts {
-    let now = chrono::Local::now();
+    let now = jiff::ZonedDateTime::now();
     SystemFacts {
         hostname: crate::env::hostname(),
         os_name: std::env::consts::OS.into(),
         os_build: String::new(),
         boot_utc: None,
-        time_zone: now.format("UTC%:z").to_string(),
-        local_time: now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false),
+        time_zone: now.strftime("UTC%:z").to_string(),
+        local_time: now.strftime("%Y-%m-%dT%H:%M:%S%:z").to_string(),
         utc_time: crate::time::utc_now(),
         account: crate::env::os_user(),
         elevated: is_elevated(),
@@ -89,7 +89,6 @@ pub(super) mod windows_impl {
     //! Read-only Win32 queries. Nothing here writes to the machine: no files, no registry, no sessions.
     //! The small helpers (handle guard, UTF-16, FILETIME, error text) are shared with `volatile`.
     use super::*;
-    use chrono::Offset;
     use std::ffi::c_void;
     use std::os::windows::ffi::OsStrExt;
     use std::ptr::null_mut;
@@ -167,8 +166,7 @@ pub(super) mod windows_impl {
         let unix = t - FILETIME_UNIX_DIFF;
         let secs = unix.div_euclid(10_000_000);
         let nanos = (unix.rem_euclid(10_000_000) * 100) as u32;
-        chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos)
-            .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        crate::collect::utc_seconds(secs).map(|s| format!("{s}.{:03}Z", nanos / 1_000_000))
     }
 
     /// A Win32 error code as stable English text (not the localised system message).
@@ -390,20 +388,49 @@ pub(super) mod windows_impl {
         format!("UTC{}{:02}:{:02}", sign, off.abs() / 60, off.abs() % 60)
     }
 
+    /// (boot time, local time, UTC time) texts of the instant `now`, `up_ms` after the boot, at a zone `bias`
+    /// (minutes west of UTC, Win32 sign): `2026-11-15T09:46:40Z`, `2026-11-15T10:46:40.123+01:00`,
+    /// `2026-11-15T09:46:40.123Z`.
+    pub(crate) fn clock_texts(
+        now: std::time::SystemTime,
+        up_ms: u64,
+        bias: i32,
+    ) -> (Option<String>, String, String) {
+        let (secs, nanos) = crate::collect::unix_parts(now);
+        // Milliseconds since the kernel started (sleep included; with Fast Startup, since the last full boot).
+        let boot_utc = i64::try_from(up_ms).ok().and_then(|ms| {
+            let boot =
+                i128::from(secs) * 1_000_000_000 + i128::from(nanos) - i128::from(ms) * 1_000_000;
+            let boot_secs = i64::try_from(boot.div_euclid(1_000_000_000)).ok()?;
+            crate::collect::utc_seconds(boot_secs).map(|s| format!("{s}Z"))
+        });
+        // A zone more than a day off UTC is not a zone: written as UTC, as always.
+        let offset = Some(-bias * 60)
+            .filter(|o| -86_400 < *o && *o < 86_400)
+            .unwrap_or(0);
+        let local = crate::collect::utc_seconds(secs + i64::from(offset)).unwrap_or_default();
+        let (sign, off) = (if offset < 0 { '-' } else { '+' }, offset.unsigned_abs());
+        (
+            boot_utc,
+            format!(
+                "{local}.{:03}{sign}{:02}:{:02}",
+                nanos / 1_000_000,
+                off / 3600,
+                off % 3600 / 60
+            ),
+            crate::time::utc_millis(now),
+        )
+    }
+
     pub fn facts() -> SystemFacts {
-        let now = chrono::Utc::now();
+        let now = std::time::SystemTime::now();
         // SAFETY: GetTickCount64 has no preconditions.
         let up_ms = unsafe { GetTickCount64() };
-        // Milliseconds since the kernel started (sleep included; with Fast Startup, since the last full boot).
-        let boot_utc = i64::try_from(up_ms)
-            .ok()
-            .and_then(|ms| now.checked_sub_signed(chrono::Duration::milliseconds(ms)))
-            .map(|b| b.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         let (key, bias) = time_zone().unwrap_or_else(|| {
-            let off = chrono::Local::now().offset().local_minus_utc() / 60;
+            let off = jiff::ZonedDateTime::now().offset().seconds() / 60;
             (String::new(), -off)
         });
-        let offset = chrono::FixedOffset::east_opt(-bias * 60).unwrap_or_else(|| chrono::Utc.fix());
+        let (boot_utc, local_time, utc_time) = clock_texts(now, up_ms, bias);
         let offset_text = utc_offset_text(bias);
         let time_zone = if key.is_empty() {
             offset_text
@@ -417,10 +444,8 @@ pub(super) mod windows_impl {
             os_build,
             boot_utc,
             time_zone,
-            local_time: now
-                .with_timezone(&offset)
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, false),
-            utc_time: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            local_time,
+            utc_time,
             account: account().unwrap_or_else(crate::env::os_user),
             elevated: is_elevated(),
             system_drive: system_drive(),
@@ -443,8 +468,8 @@ pub(super) mod windows_impl {
             assert!(f.boot_utc.as_deref().is_some_and(|b| b.ends_with('Z')));
             assert!(f.time_zone.contains("UTC"));
             // Same instant, two notations.
-            let l = chrono::DateTime::parse_from_rfc3339(&f.local_time).unwrap();
-            let u = chrono::DateTime::parse_from_rfc3339(&f.utc_time).unwrap();
+            let l: jiff::Timestamp = f.local_time.parse().unwrap();
+            let u: jiff::Timestamp = f.utc_time.parse().unwrap();
             assert_eq!(l, u);
         }
 
