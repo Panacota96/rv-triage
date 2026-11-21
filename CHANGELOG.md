@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.4.0](https://github.com/Panacota96/rv-triage/compare/v0.3.1...v0.4.0) (2026-11-21)
+
+
+### Features
+
+* **update:** check for a newer release (update-check, start-up banner) ([#13](https://github.com/Panacota96/rv-triage/issues/13)) ([f6955b7](https://github.com/Panacota96/rv-triage/commit/f6955b7178ec52b668c841d7de8c3b6077b5ba64))
+
 ## [0.3.1](https://github.com/Panacota96/rv-triage/compare/v0.3.0...v0.3.1) (2026-11-19)
 
 
