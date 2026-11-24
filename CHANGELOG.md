@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.4.1](https://github.com/Panacota96/rv-triage/compare/v0.4.0...v0.4.1) (2026-11-24)
+
+
+### Performance Improvements
+
+* **verify:** stream the audit log instead of holding every entry ([#15](https://github.com/Panacota96/rv-triage/issues/15)) ([d25b8d2](https://github.com/Panacota96/rv-triage/commit/d25b8d2fa3c4d5ae656730d3581d67a85b511df6))
+
 ## [0.4.0](https://github.com/Panacota96/rv-triage/compare/v0.3.1...v0.4.0) (2026-11-21)
 
 
