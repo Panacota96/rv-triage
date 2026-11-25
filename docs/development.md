@@ -119,7 +119,7 @@ sequenceDiagram
 
 | Artifact | Built by |
 | --- | --- |
-| `rv-triage-X.Y.Z-windows-x64.zip` | portable (the USB-stick package): both exes + README + LICENSE + NOTICE + CHANGELOG + `docs/` + `examples/` |
+| `rv-triage-X.Y.Z-windows-x64.zip` | portable (the USB-stick package): both exes + README + LICENSE + COMMERCIAL.md + NOTICE + CHANGELOG + `docs/` + `examples/` |
 | `rv-triage-X.Y.Z-windows-x64-setup.exe` | Inno Setup (`packaging/windows/installer.iss`), per-user, for the examiner's workstation |
 | `SHA256SUMS` | `sha256sum` over the assets |
 | `sbom.cdx.json` | `cargo cyclonedx` |

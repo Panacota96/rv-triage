@@ -52,7 +52,7 @@ Release assets on the GitHub Releases page of the repository (`Panacota96/rv-tri
 
 | Asset | What it is |
 | --- | --- |
-| `rv-triage-X.Y.Z-windows-x64.zip` | Portable: `rv-triage.exe`, `rv-triage-gui.exe`, README, LICENSE, NOTICE, CHANGELOG, `docs/`, `examples/` |
+| `rv-triage-X.Y.Z-windows-x64.zip` | Portable: `rv-triage.exe`, `rv-triage-gui.exe`, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG, `docs/`, `examples/` |
 | `rv-triage-X.Y.Z-windows-x64-setup.exe` | Inno Setup installer, per-user |
 | `SHA256SUMS` | SHA-256 of the zip, the installer and the SBOM (`sha256sum` format: `<hash>  ./<file>`) |
 | `sbom.cdx.json` | CycloneDX software bill of materials (every Rust dependency and version) |
@@ -164,7 +164,7 @@ Unattended:
 ```
 
 The installer is for the examiner's workstation; **do not run it on a machine being collected**. It copies the
-executables, README, LICENSE, NOTICE, CHANGELOG and `docs\`. Note: `packaging/windows/installer.iss` still lists
+executables, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG and `docs\`. Note: `packaging/windows/installer.iss` still lists
 `examples\sample\evidence\*`, a folder the collection sample no longer has (it is `examples\sample\source\`); until
 that line is fixed the installer build fails or ships no sample. Use the zip for the sample.
 
