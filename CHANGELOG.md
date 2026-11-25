@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.4.2](https://github.com/Panacota96/rv-triage/compare/v0.4.1...v0.4.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **trust:** accept leap seconds only at 23:59:60; test imprint and nonce bounds ([#20](https://github.com/Panacota96/rv-triage/issues/20)) ([4f415d8](https://github.com/Panacota96/rv-triage/commit/4f415d873714d1d8e3ce2ed3ac7c7014c27b824e))
+* **trust:** reject malformed timestamp times instead of panicking; require the nonce ([#17](https://github.com/Panacota96/rv-triage/issues/17)) ([31eebe6](https://github.com/Panacota96/rv-triage/commit/31eebe610fe52ea2e6ec203223cb3c604f6e0a9a))
+
 ## [0.4.1](https://github.com/Panacota96/rv-triage/compare/v0.4.0...v0.4.1) (2026-11-24)
 
 
